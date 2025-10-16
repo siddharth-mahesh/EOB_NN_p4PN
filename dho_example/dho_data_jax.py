@@ -131,19 +131,19 @@ class DampedHarmonicOscillator:
 
 if __name__ == '__main__':
     SEED = 5678
-    key_prim, key_damp = jax.random.split(jax.random.PRNGKey(SEED),2)
+    key,key_prim, key_damp = jax.random.split(jax.random.PRNGKey(SEED),3)
+    prims = jax.random.uniform(key_prim, (200, 2), minval=-1, maxval=1)
+    dampings = 10**jax.random.uniform(key_damp, (200, 1), minval=jnp.log10(.1), maxval=jnp.log10(2))
+    x0s = jnp.hstack([prims,dampings])
+    data_class = DampedHarmonicOscillator()
+    x_train , y_train = data_class(x0s, rhs=True)
+    key_prim, key_damp = jax.random.split(key,2)
     prims = jax.random.uniform(key_prim, (50, 2), minval=-1, maxval=1)
     dampings = 10**jax.random.uniform(key_damp, (50, 1), minval=jnp.log10(.1), maxval=jnp.log10(2))
     x0s = jnp.hstack([prims,dampings])
     data_class = DampedHarmonicOscillator()
-    x_data , y_data = data_class(x0s, rhs=True)
-    print(x_data.shape, y_data.shape)
-    times , trajectories = data_class(x0s, rhs=False)
-    print(times.shape, trajectories.shape)
-    off = 20
-    for i in range(5):
-        plt.plot(times[i+off], trajectories[i+off,:,0],label = f'b = {x0s[i+off,2]}')
-    plt.legend()
-    plt.show()
-        
-    
+    x_val , y_val = data_class(x0s, rhs=True)
+    jnp.save("x_train.npy", x_train)
+    jnp.save("y_train.npy", y_train)
+    jnp.save("x_val.npy", x_val)
+    jnp.save("y_val.npy", y_val)
