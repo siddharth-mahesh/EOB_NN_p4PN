@@ -6,12 +6,12 @@
 #SBATCH --mail-user=sm0193@mix.wvu.edu
 #SBATCH --ntasks=1                # Each worker is a single task
 #SBATCH --array=1-20
+#SBATCH --output=/users/sm0193/scratch/EOB_NN_p4PN/dho_example/logs/worker_%A_%a.out
+#SBATCH --error=/users/sm0193/scratch/EOB_NN_p4PN/dho_example/logs/worker_%A_%a.err
 
 # output and error logs
 PROJECT_DIR="/users/sm0193/scratch/EOB_NN_p4PN/dho_example"
 LOG_DIR="${PROJECT_DIR}/logs"
-#SBATCH --output=${LOG_DIR}/worker_%A_%a.out  # %A=Job ID, %a=Array Task ID
-#SBATCH --error=${LOG_DIR}/worker_%A_%a.err   # Standard error log
 
 # ---
 # Environment Setup

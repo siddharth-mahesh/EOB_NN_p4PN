@@ -5,6 +5,7 @@ Code to generate training data for the damped harmonic oscillator.
 import diffrax
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 class DampedHarmonicOscillator:
@@ -154,7 +155,7 @@ def generate_training_data(num_trajectories, seed, val_split):
 
 if __name__ == "__main__":
     (x_train, y_train), (x_val, y_val) = generate_training_data(100, 42, 0.2)
-    np.save("x_train.npy", x_train)
-    np.save("y_train.npy", y_train)
-    np.save("x_val.npy", x_val)
-    np.save("y_val.npy", y_val)
+    np.savetxt("x_train.dat", np.asarray(x_train))
+    np.savetxt("y_train.dat", np.asarray(y_train))
+    np.savetxt("x_val.dat", np.asarray(x_val))
+    np.savetxt("y_val.dat", np.asarray(y_val))
