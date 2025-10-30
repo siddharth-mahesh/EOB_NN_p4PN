@@ -1,0 +1,22 @@
+
+def _w_circ(self, r, p_phi, nu, constants):
+    """
+    Compute the circular frequency.
+
+    Args:
+        r (float): Radial position.
+        p_phi (float): Angular momentum.
+        nu (float): Symmetric mass ratio.
+        constants (dict): Dictionary of constants.
+
+    Returns:
+        float: Circular frequency.
+    """
+    u = 1 / (r + 1e-100)
+    a = self._a_potential(r, constants)
+    d = self._d_potential(r, constants)
+    tmp0 = jnp.sqrt(a)
+    tmp2 = ((p_phi)*(p_phi))*((u)*(u))
+    tmp4 = 2*nu*(tmp0*jnp.sqrt(tmp2 + 1) - 1)
+    w_circ = p_phi*tmp0*((u)*(u))/jnp.sqrt(tmp2*tmp4 + tmp2 + tmp4 + 1)
+    return w_circ

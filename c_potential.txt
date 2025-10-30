@@ -1,0 +1,23 @@
+
+def _c_potential(self, r, p_phi, nu, constants):
+    """
+    Compute the Hamiltonian C potential.
+    The C potential is given by:
+        C = lim_{p_r -> 0} (1/p_r * dH/dp_r)
+
+    Args:
+        r (float): Radial position.
+        p_phi (float): Angular momentum.
+        nu (float): Symmetric mass ratio.
+        constants (dict): Dictionary of constants.
+
+    Returns:
+        float: Hamiltonian C potential.
+    """
+    u = 1 / (r + 1e-100)
+    a = self._a_potential(r, constants)
+    d = self._d_potential(r, constants)
+    tmp0 = ((p_phi)*(p_phi))*((u)*(u))
+    tmp2 = 2*nu*(jnp.sqrt(a)*jnp.sqrt(tmp0 + 1) - 1)
+    c_circ = jnp.pow(a, 3.0/2.0)/(d*jnp.sqrt(tmp0*tmp2 + tmp0 + tmp2 + 1))
+    return c_circ

@@ -2,130 +2,73 @@
     This file contains the EOB3PN class,
     which implements the non-spinning 3PN Effective One Body model
     with 3.5PN circular radiation-reaction.
-    The implementation builds the network for a single input set
-    and the training uses vmap to vectorize the network.
 """
 
 # Core libraries
-import jax
-import jax.numpy as jnp
+import tensorflow as tf 
+import numpy as np
 
-# set jax to 64 bit precision
-jax.config.update("jax_enable_x64", True)
-import jax.scipy as jsp
-import equinox as eqx
-import diffrax
-
-class MLP(eqx.Module):
-    lin_1: eqx.nn.Linear
-    lin_2: eqx.nn.Linear
-    lin_3: eqx.nn.Linear
-    standalone: bool
-
-    def __init__(self, key, input_dim, output_dim, hidden_dim, standalone=False):
-        self.standalone = standalone
-        key1, key2, key3 = jax.random.split(key, 3)
-        self.lin_1 = eqx.nn.Linear(input_dim, hidden_dim, key=key1)
-        self.lin_2 = eqx.nn.Linear(hidden_dim, hidden_dim, key=key2)
-        self.lin_3 = eqx.nn.Linear(hidden_dim, output_dim, key=key3)
-
-    def _single_forward(self, x):
-        h = jax.nn.tanh(self.lin_1(x))
-        h = h + jax.nn.tanh(self.lin_2(h))
-        return self.lin_3(h)
-
-    def __call__(self, x):
-        if not self.standalone:
-            return self._single_forward(x)
-        return jax.vmap(self._single_forward, in_axes=0)(x)
-
-
-class EOB(eqx.Module):
-    conservative_order: str
-    radiative_order: str
-    A_p4pn: MLP
-    D_p4pn: MLP
-    F_p_4_nqc: MLP
-
-    def __init__(
-        self,
-        key,
-        pade,
-        hidden_dim_a,
-        hidden_dim_d,
-        hidden_dim_f):
+class EOB(tf.Module):
+    def __init__(self, name=None):
         """
         Initialize the EOB class.
 
         Args:
-            key (jax.random.PRNGKey): Random key for initialization.
-            pade (bool): Whether to use Pade approximant for A,D, and F potentials.
-            num_layers_a (int): Number of layers in the A potential network.
-            hidden_dim_a (int): Hidden dimension of the A potential network.
-            num_layers_d (int): Number of layers in the D potential network.
-            hidden_dim_d (int): Hidden dimension of the D potential network.
-            num_layers_f (int): Number of layers in the F potential network.
-            hidden_dim_f (int): Hidden dimension of the F potential network.
+            name (str): Name of the module.
         """
+
+        super().__init__(name=name)
         # Some settings to make this class extensible to 4 PN
         # These will be extended with higher orders in the future
-        self.conservative_order = "3"
-        self.radiative_order = "3.5"
-        A_input_dim = 2 # u , eta
-        A_net = MLP(key, A_input_dim, 1, hidden_dim_a)
-        D_input_dim = 2 # u , eta
-        D_net = MLP(key, D_input_dim, 1, hidden_dim_d)
-        F_input_dim = 5 # eta , r , pr , phi , pphi
-        F_net = MLP(key, F_input_dim, 1, hidden_dim_f)
-        self.A_p4pn = A_net
-        self.D_p4pn = D_net
-        self.F_p_4_nqc = F_net
+        self.conservative_order = 3
+        self.radiative_order = 3.5
+        self.pade = self._pade_1_3
 
-    def pade_1_4(a_1, a_3, a_4, a_5, x):
+    @tf.function
+    def _pade_1_3(self,x,a_1, a_3, a_4):
         """
-        Compute the Pade approximant P^1_4 for the Hamiltonian A potential.
+        Compute the Pade approximant P^1_3 for the Hamiltonian A potential.
         The Hamiltonian A potential is given by a polynomial of the form
-        p(x) = 1 + a_1 x + a_3 x^3 + a_4 x^4 + a_5 x^5
+        p(x) = 1 + a_1 x + a_3 x^3 + a_4 x^4
 
         Args:
-            x (float): Input parameter, typically 1/r.
-            a_1 (float): Coefficient a_1.
-            a_3 (float): Coefficient a_3.
-            a_4 (float): Coefficient a_4.
-            a_5 (float): Coefficient a_5.
+            x (tf.Tensor): Input tensor, typically 1/r (None,).
+            a_1 (tf.Tensor): Coefficient a_1 (None,).
+            a_3 (tf.Tensor): Coefficient a_3 (None,).
+            a_4 (tf.Tensor): Coefficient a_4 (None,).
 
         Returns:
-            float: Pade approximant P^1_4 evaluated at x.
+            tf.Tensor: Pade approximant P^1_3 evaluated at x (None,).
         """
-        tmp2 = ((a_1)*(a_1))
-        tmp8 = ((a_1)*(a_1)*(a_1))
-        tmp1 = 2*a_1*a_4
-        tmp5 = (1.0/(((a_1)*(a_1)*(a_1)*(a_1)) + 2*a_1*a_3 - a_4))
-        tmp7 = -a_1*a_4 + a_3*tmp2 + a_5
-        pade_1_4 = (tmp5*x*(((a_1)*(a_1)*(a_1)*(a_1)*(a_1)) + 3*a_3*tmp2 + a_5 - tmp1) + 1)/(-a_1*tmp5*tmp7*((x)*(x)) + tmp5*tmp7*x + tmp5*((x)*(x)*(x)*(x))*(((a_3)*(a_3))*tmp2 - a_3*a_5 - a_3*tmp1 + ((a_4)*(a_4)) - a_5*tmp8) + tmp5*((x)*(x)*(x))*(-2*a_1*((a_3)*(a_3)) + a_3*a_4 - a_4*tmp8 + a_5*tmp2) + 1)
-        return pade_1_4
-
+        tmp1 = a_1*a_3
+        tmp2 = (1.0/(((a_1)*(a_1)*(a_1)) + a_3))
+        tmp4 = -a_4 + tmp1
+        pade_1_3 = (tmp2*x*(((a_1)*(a_1)*(a_1)*(a_1)) - a_4 + 2*tmp1) + 1)/(-a_1*tmp2*tmp4*((x)*(x)) + tmp2*tmp4*x + tmp2*((x)*(x)*(x))*(-((a_1)*(a_1))*a_4 - ((a_3)*(a_3))) + 1)
+        return pade_1_3
+    
+    @tf.function
     def _pade_0_3(self, x, d_2, d_3):
         """
         Compute the Pade approximant P^{0}_{3} for the polynomial
         p(x) = 1 + d_2 x^2 + d_3 x^3
 
         Args:
-            x (float): Input parameter, typically 1/r.
-            d_2 (float): Coefficient d_2.
-            d_3 (float): Coefficient d_3.
+            x (tf.Tensor): Input tensor, typically 1/r (None,).
+            d_2 (tf.Tensor): Coefficient d_2 (None,).
+            d_3 (tf.Tensor): Coefficient d_3 (None,).
 
         Returns:
-            float: Pade approximant P^{0}_{3} evaluated at x.
+            tf.Tensor: Pade approximant P^{0}_{3} evaluated at x (None,).
         """
         return 1 / (1 - x * x * (d_3 * x + d_2) + 1e-100)
 
+    @tf.function
     def _set_eob_constants_3PN(self, nu):
         """
         Calculate the dictionary of EOB constants.
 
         Args:
-            nu (float): Symmetric mass ratio.
+            nu (tf.Tensor): Symmetric mass ratio (None,).
 
         Returns:
             dict: Dictionary of EOB constants.
@@ -164,7 +107,8 @@ class EOB(eqx.Module):
             'F_2': tf.cast(F_2, dtype=tf.float64), 'F_3': tf.cast(F_3, dtype=tf.float64), 'F_4': tf.cast(F_4, dtype=tf.float64), 'F_5': tf.cast(F_5, dtype=tf.float64), 'F_6': tf.cast(F_6, dtype=tf.float64),
             'F_6_l': tf.cast(F_6_l, dtype=tf.float64), 'F_7': tf.cast(F_7, dtype=tf.float64)
         }
-    def _a_potential(self, r, eta, constants):
+    @tf.function
+    def _a_potential(self, r, constants):
         """
         Compute the Hamiltonian A potential.
 
@@ -176,10 +120,11 @@ class EOB(eqx.Module):
             tf.Tensor: Hamiltonian A potential (batch_size,)
         """
         u = 1 / r
-        a = self.pade_1_4(u, constants['a_1'], constants['a_3'], constants['a_4'], self.A_p4pn(u, eta))
+        a = self.pade(u, constants['a_1'], constants['a_3'], constants['a_4'])
         return a
     
-    def _d_potential(self, r, eta, constants):
+    @tf.function
+    def _d_potential(self, r, constants):
         """
         Compute the Hamiltonian D potential.
 
@@ -194,6 +139,7 @@ class EOB(eqx.Module):
         d = self._pade_0_3(u, constants['d_2'], constants['d_3'])
         return d
 
+    @tf.function
     def _hamiltonian(self, x, nu, constants):
         """
         Compute the Hamiltonian.
@@ -214,6 +160,7 @@ class EOB(eqx.Module):
         h_real = tf.math.sqrt(2*nu*(tf.math.sqrt(a*(((p_phi)*(p_phi))*((u)*(u)) + ((p_r)*(p_r))*(a/d + ((p_r)*(p_r))*((u)*(u))*z_3) + 1)) - 1) + 1)/nu
         return tf.cast(h_real, dtype=tf.float64)
 
+    @tf.function
     def _flux(self, v, nu, constants):
         """
         Compute the circular gravitational flux at the 3.5 PN order
@@ -337,6 +284,7 @@ class EOB(eqx.Module):
 
         return tf.expand_dims(tf.cast(flux, dtype=tf.float64), axis=-1)
 
+    @tf.function
     def _strain(self, ys, dydts, nu):
         """
         Calculate the complex strain from the state and its derivatives.

@@ -4,17 +4,16 @@ from nrpy.c_codegen import c_codegen as ccg
 import time
 
 start_time = time.time()
-v_p , v , v_m , x = sp.symbols('v_p v v_m x',real=True)
+v_p , v , x = sp.symbols('v_p v x',real=True,positive=True)
 nu = sp.Symbol("nu",real=True)
 eta = nu
 e_2 = -x * (1 + sp.Rational(1,3)*eta - (4 - sp.Rational(9,4)*eta + sp.Rational(1,9)*eta**2)*x) / (1 + sp.Rational(1,3)*eta - (3 - sp.Rational(35,12)*eta)*x)
-soln = sp.solve(sp.diff(e_2.subs(x,v**2),v),v)
-v_1 = soln[2]
-v_2 = soln[4]
-# v_2 is preferable for maximizing BE
+soln = sp.solve(sp.diff(e_2,x),x)
+v_meco = sp.sqrt(soln[1])
 end_time = time.time()
+print(sp.pycode(sp.simplify(v_meco)).replace('math.','sp.'))
 print(f"v_MECO solved! Time taken: {end_time - start_time:.2f} seconds")
-#print(sp.pycode(sp.simplify(v_2)).replace('math.','tf.math.'))
+
 # Fast P resummation of the GW flux
 max_order = 7
 p2_order = 5
@@ -22,18 +21,16 @@ p2_order = 5
 start_time = time.time()
 # Basic symbols
 F = [sp.Symbol(f"F_{i}",real=True) for i in range(max_order + 1)]
+F_6_l, v_m = sp.symbols("F_6_l v_m",real=True)
 F[0] = sp.sympify(1)
 F[1] = sp.sympify(0)
 c = [sp.Symbol(f"c_{i}",real=True) for i in range(max_order + 1)]
 c[0] = sp.sympify(1)
-#Need to handle the log terms specifically
-l , f_6_l = sp.symbols('l F_6_l',real=True)
 
 # Full set of inputs: F_i , f_6_l , v , v_p , v_m
 
-# RHS = F_T*(1 - v/v_p) Taylor expanded to v^7, l = log(16 * v**2)
-# (1 + 2*f_6_l*log(v/v_m)) = (1 + f_6_l*log(16*v**2/(16*v_m**2))) = 1 + f_6_l(l - log(16 * v_m**2))
-rhs = (sum(F[i] * v**i for i in range(max_order + 1)) + f_6_l*l*v**6)*(1 - v/v_p)/(1 + f_6_l*(l - sp.log(16*v_m**2))*v**6)
+# RHS = F_T*(1 - v/v_p) Taylor expanded to v^7 = sum (F_T[i] - F_T[i-1]/v_p)*v**i
+rhs = F[0] + sum((F[i] - F[i - 1]/v_p)*v**i for i in range(1,max_order + 1))
 rhs_T = [sp.series(rhs,v,0,max_order+1).removeO().coeff(v,i) for i in range(max_order + 1)]
 end_time = time.time()
 print(f"rhs solved! Time taken: {end_time - start_time:.2f} seconds")
@@ -62,7 +59,7 @@ end_time = time.time()
 print(f"c coefficients solved! Time taken: {end_time - start_time:.2f} seconds")
 # Newton-factorized, RR flux at 3.5 PN order
 start_time = time.time()
-flux_prefactor = (1 + 2 * f_6_l * sp.log(v / v_m))/(1 - v/v_p)
+flux_prefactor = (1 + 2 * v**6 * F_6_l * sp.log(v / v_m))/(1 - v/v_p)
 cf = 1 + c[max_order]*v
 i = max_order - 1
 while i > 0:
@@ -91,19 +88,19 @@ flux = {sp.pycode(flux).replace('math.','sp.').replace('32/5','sp.Rational(32,5)
 nrpy_ccode = ccg(flux, ['const REAL flux'], include_braces=False, verbose=False)
 nrpy_pycode = nrpy_ccode.replace('const REAL ', '    ')
 nrpy_pycode = nrpy_pycode.replace(';', '')
-nrpy_pycode = nrpy_pycode.replace('sqrt', 'tf.math.sqrt').replace('pow', 'tf.math.pow').replace('log','tf.math.log')
-out_str = f\"\"\"@tf.function
+nrpy_pycode = nrpy_pycode.replace('sqrt', 'jnp.sqrt').replace('pow', 'jnp.pow').replace('log','jnp.log')
+out_str = f\"\"\"
 def _flux(self, v, nu, constants):
     \\"\\"\\"
     Compute the circular gravitational flux at the 3.5 PN order
 
     Args:
-        v (tf.Tensor): Orbital velocity (None,)
-        nu (tf.Tensor): Compactness (None,)
+        v (float): Orbital velocity
+        nu (float): Compactness
         constants (dict): Dictionary of constants
 
     Returns:
-        tf.Tensor: Gravitational flux (None,)
+        float: Gravitational flux
     \\"\\"\\"
     F_2 = constants['F_2']
     F_3 = constants['F_3']
@@ -114,7 +111,7 @@ def _flux(self, v, nu, constants):
     F_7 = constants['F_7']
     v_p = constants['v_pole_p2']
     v_m = constants['v_meco_p2']
-    M_LN2 = tf.cast(tf.math.log(2.0), tf.float64)
+    M_LN2 = jnp.log(2.0)
 {{nrpy_pycode}}
     return flux
 \"\"\"
