@@ -11,7 +11,7 @@ def _hamiltonian(self, y, nu, constants):
     Returns:
         float: Hamiltonian evaluated at y.
     """
-    r , phi , p_r , p_phi = tf.split(x,4,axis=-1)
+    r , phi , p_r , p_phi = y
     u = 1 / r
     z_3 = constants['z_3']
     a = self._a_potential(r, constants)

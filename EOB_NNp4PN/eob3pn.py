@@ -3,9 +3,10 @@ This file contains the EOB3PN class,
 which implements the non-spinning 3PN Effective One Body model
 with 3.5PN circular radiation-reaction.
 """
-
+I = 1j
 import jax
 import jax.numpy as jnp
+from gamma import gamma as tgamma
 from jax.numpy import log
 
 # set jax to 64 bit precision
@@ -82,6 +83,7 @@ class EOB:
         e_gamma = 0.577215664901532860606512090082402431042
         pi = 3.14159265358979323846264338327950288419716939937510
         theta_hat = 1039/4620
+        M_LN2 = jnp.log(2)
         tmp0 = 2*nu
         tmp1 = ((pi)*(pi))
         tmp3 = 35*nu - 36
@@ -103,6 +105,13 @@ class EOB:
         F_6 = -1712.0/105.0*e_gamma + nu*(-88.0/3.0*theta_hat + (41.0/48.0)*tmp1 - 2913613.0/272160.0) + (16.0/3.0)*tmp1 - 94403.0/3024.0*tmp5 - 775.0/324.0*tmp7 - 856.0/105.0*log(64*tmp9) + 6643739519.0/69854400.0
         F_6_l = -856.0/105.0
         F_7 = pi*((214745.0/1728.0)*nu + (193385.0/3024.0)*tmp5 - 16285.0/504.0)
+        f_1 = (55.0/42.0)*nu - 43.0/21.0
+        delta_1_5 = 7.0/3.0
+        f_2 = -6745.0/1512.0*nu + (2047.0/1512.0)*tmp5 - 536.0/189.0
+        delta_2_5 = -7.0/6.0*nu - 56.0/5.0
+        delta_3 = (428.0/105.0)*pi
+        f_3 = -856.0/105.0*e_gamma + (41.0/96.0)*nu*tmp1 - 34625.0/3696.0*nu - 227875.0/33264.0*tmp5 + (114635.0/99792.0)*tmp7 - 1712.0/105.0*M_LN2 + 21428357.0/727650.0
+        f_3_l = -856.0/105.0
 
         return {
             'e_gamma': e_gamma, 'pi': pi, 'theta_hat': theta_hat,
@@ -110,7 +119,10 @@ class EOB:
             'd_2': d_2, 'd_3': d_3,
             'v_meco_p2': v_meco_p2, 'v_pole_p2': v_pole_p2,
             'F_2': F_2, 'F_3': F_3, 'F_4': F_4, 'F_5': F_5, 'F_6': F_6,
-            'F_6_l': F_6_l, 'F_7': F_7
+            'F_6_l': F_6_l, 'F_7': F_7,
+            'f_1': f_1, 'delta_1_5': delta_1_5, 'f_2': f_2,
+            'delta_2_5': delta_2_5, 'delta_3': delta_3, 
+            'f_3': f_3, 'f_3_l': f_3_l
         }
 
     def _a_potential(self, r, constants):
@@ -457,13 +469,15 @@ class EOB:
         r0 = 6.0
         params = (nu, constants)
         f = self._isco_condition(r0, params)
-        for _ in range(100):
-            if jnp.abs(f) < 1e-12:
-                return r0
+        def body(carry):
+            i , r0 , _ = carry
             f , df = jax.value_and_grad(self._isco_condition, argnums=0)(r0, params)
-            r0 -= f / df
-        raise ValueError(f"Newton's method did not converge, final error: {f}")
-
+            return (i+1,r0 - f/df,f)
+        def stop(carry):
+            return (jnp.abs(carry[2]) < 1e-12)
+        carry = jax.lax.while_loop(stop,body,(0,r0,f))
+        return carry[1]
+        
     def _circular_orbit_finder(self, r0, params, tol=1e-12, max_iter=100):
         """
         Finds the radius of a circular orbit using a Newton's method.
@@ -479,12 +493,14 @@ class EOB:
             float: Radius of the circular orbit
         """
         f = self._circular_orbit_condition(r0, params)
-        for _ in range(max_iter):
-            if jnp.abs(f) < tol:
-                return r0
+        def body(carry):
+            i , r0 , _ = carry
             f , df = jax.value_and_grad(self._circular_orbit_condition, argnums=0)(r0, params)
-            r0 -= f / df
-        raise ValueError(f"Newton's method did not converge, final error: {f}")
+            return (i+1,r0 - f/df,f)
+        def stop(carry):
+            return (jnp.abs(carry[2]) < tol)
+        carry = jax.lax.while_loop(stop,body,(0,r0,f))
+        return carry[1]
 
     def _initial_conditions(self, x):
         """
@@ -533,8 +549,6 @@ class EOB:
             jnp.ndarray: Trajectory of the system
         """
         r_ISCO = self._isco_finder(nu, constants)
-        print(y0)
-        print(r_ISCO)
         params = (nu, r_ISCO, constants)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self._eom),
@@ -548,19 +562,107 @@ class EOB:
             event=diffrax.Event(self._event_fn, optimistix.Newton(1e-5,1e-5,optimistix.rms_norm)),
             saveat=diffrax.SaveAt(t0=True,t1=True,dense=True)
         )
-        times = jnp.linspace(0, sol.ts[-1], 10000)
+        times = jnp.linspace(0, sol.ts[-1], 3000)
         trajectory = jax.vmap(sol.evaluate, in_axes=0)(times)
         return times, trajectory
-    def __call__(self, x):
+
+    def _strain(self, point , nu , constants):
+        """
+        Calculate the EOB factorized resummed strain.
+
+        Args:
+            point (jnp.ndarray): point in the trajectory [r,phi,p_r,p_phi].
+            nu (float): symmetric mass ratio
+            constants (Dict): dictionary of EOB constants
+
+        Returns:
+            strain (complex): Complex GW strain.
+        """
+        _ , phi , _ , _ = point
+        f_1 = constants['f_1']
+        f_2 = constants['f_2']
+        f_3 = constants['f_3']
+        f_3_l = constants['f_3_l']
+        delta_1_5 = constants['delta_1_5']
+        delta_2_5 = constants['delta_2_5']
+        delta_3 = constants['delta_3']
+        pi = constants['pi']
+        e_gamma = constants['e_gamma']
+        r0 = 2 / jnp.sqrt(jnp.e)
+        # t and r_ISCO don't matter here
+        Omega = self._eom(0,point,(nu,0,constants))[1]
+        H = self._hamiltonian(point,nu,constants)
+        tmp0 = jnp.pow(Omega, 2.0/3.0)
+        tmp2 = 4*I*H*Omega
+        h22 = (4.0/5.0)*jnp.sqrt(5)*nu*jnp.sqrt(pi)*tmp0*(1 + (1.0/2.0)*(((H)*(H)) - 1)/nu)*(jnp.pow(Omega, 4.0/3.0)*f_2 + ((Omega)*(Omega))*(f_3 + f_3_l*jnp.log(jnp.cbrt(Omega))) + f_1*tmp0 + 1)*tgamma(3 - tmp2)*jnp.exp(-2*I*phi)*jnp.exp(I*(jnp.pow(Omega, 5.0/3.0)*delta_2_5 + ((Omega)*(Omega))*delta_3 + Omega*delta_1_5))*jnp.exp(2*H*Omega*pi + tmp2*jnp.log(4*Omega*r0))
+
+        return h22
+    
+    def _strain_from_dynamics(self,trajectory,nu,constants):
+        """
+        Compute the GW strain given the trajectory
+
+        Args:
+            trajectory (jnp.ndarray): trajectory of the system
+            nu (float): symmetric mass ratio
+            constants (Dict): dictionary of EOB constants
+
+        Returns:
+            strain (complex): Complex GW strain.
+        """
+        return jax.vmap(self._strain, in_axes=(0,None,None))(trajectory,nu,constants)
+
+    def _single_pass(self, x):
+        """
+        Compute the GW strain given the parameters
+
+        Args:
+            x (jnp.ndarray): parameters [nu, omega_0]
+
+        Returns:
+            times (jnp.ndarray): times
+            strain (complex): Complex GW strain.
+        """
         nu = x[0]
         constants = self._set_eob_constants_3PN(nu)
         ics = self._initial_conditions(x)
-        return self._dynamics(ics, nu, constants)
+        times, trajectory = self._dynamics(ics, nu, constants)
+        times_stack = jnp.reshape(times,(times.shape[0],1))
+        strain = self._strain_from_dynamics(trajectory,nu,constants)
+        strain_stack = jnp.reshape(strain,(strain.shape[0],1))
+        return jnp.hstack((times_stack , strain_stack),dtype=jnp.complex128)
+    
+    def __call__(self, x):
+        """
+        Compute the GW strain for a given batch of parameters
+
+        Args:
+            x (jnp.ndarray): batch of parameters of the form [nu, omega_0]
+
+        Returns:
+            times (jnp.ndarray): times
+            strain (complex): Complex GW strain.
+        """
+        return jax.vmap(self._single_pass, in_axes=(0))(x)
         
 
 if __name__ == "__main__":
     eob3pn = EOB()
-    times ,  trajectory = eob3pn(jnp.array([0.25, 0.01]))
+    key = jax.random.PRNGKey(0)
+    idx_key , omega_key , nu_key = jax.random.split(key,3)
+    omegas = 0.01 + 0.005*jax.random.uniform(omega_key,(100,1))
+    nus = 0.1 + 0.15*jax.random.uniform(nu_key,(100,1))
+    x = jnp.hstack((nus,omegas))
+    strain_series = eob3pn(x)
+    idx = jax.random.randint(idx_key,1,0,99)[0]
+    print(x[idx])
+    times = strain_series[idx,:,0]
+    strain = strain_series[idx,:,1]
+
     import matplotlib.pyplot as plt
-    plt.plot(trajectory[:,0]*jnp.cos(trajectory[:,1]), trajectory[:,0]*jnp.sin(trajectory[:,1]))
+    plt.plot(jnp.abs(times),jnp.real(strain),label = r'$h_+$')
+    plt.plot(jnp.abs(times),-jnp.imag(strain),label = r'$h_\times$')
+    plt.xlabel('Time')
+    plt.ylabel('Strain')
+    plt.legend()
     plt.show()
