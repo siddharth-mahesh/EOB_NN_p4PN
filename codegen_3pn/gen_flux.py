@@ -1,8 +1,10 @@
-# generate symbolic Padé approximants.
+# generate symbolic P resummed fluxes.
+import os
 import sympy as sp
 from nrpy.c_codegen import c_codegen as ccg
 import time
 
+outfolder = "codegen_3pn"
 start_time = time.time()
 v_p , v , x = sp.symbols('v_p v x',real=True,positive=True)
 nu = sp.Symbol("nu",real=True)
@@ -71,8 +73,10 @@ flux = -sp.Rational(32,5)*nu*v**7*f_P
 end_time = time.time()
 print(f"flux solved! Time taken: {end_time - start_time:.2f} seconds")
 
-out_str = f"""import sympy as sp
+out_str = f"""import os
+import sympy as sp
 from nrpy.c_codegen import c_codegen as ccg
+outfolder = '{outfolder}'
 nu = sp.Symbol('nu',real=True)
 F_2 , F_3 , F_4 , F_5 , F_6 , F_7 = sp.symbols('F_2 F_3 F_4 F_5 F_6 F_7',real=True)
 F_6_l = sp.symbols('F_6_l',real=True)
@@ -115,8 +119,8 @@ def _flux(self, v, nu, constants):
 {{nrpy_pycode}}
     return flux
 \"\"\"
-with open('flux.txt','w') as f:
+with open(os.path.join(outfolder,'flux.txt'),'w') as f:
     f.write(out_str)
 """
-with open('flux_v7_presummed.py','w') as outfile:
+with open(os.path.join(outfolder,'flux_v7_presummed.py'),'w') as outfile:
     outfile.write(out_str)

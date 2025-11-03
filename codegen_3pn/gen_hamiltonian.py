@@ -1,6 +1,7 @@
 import sympy as sp
 from nrpy.c_codegen import c_codegen as ccg
-
+import os
+outfolder = 'codegen_3pn'
 # Basic symbols
 nu , r , phi , p_r , p_phi = sp.symbols('nu r phi p_r p_phi',real=True)
 a , d , z_3 = sp.symbols('a d z_3',real=True)
@@ -33,7 +34,7 @@ def _hamiltonian(self, y, nu, constants):
     d = self._d_potential(r, constants)
 {nrpy_pycode}    return h_real
 """
-with open('hamiltonian.txt','w') as f:
+with open(os.path.join(outfolder,'hamiltonian.txt'),'w') as f:
     f.write(outstr)
 
 c = sp.simplify(1/p_r * sp.diff(h_real,p_r))
@@ -63,7 +64,7 @@ def _c_potential(self, r, p_phi, nu, constants):
     d = self._d_potential(r, constants)
 {nrpy_pycode}    return c_circ
 """
-with open('c_potential.txt','w') as f:
+with open(os.path.join(outfolder,'c_potential.txt'),'w') as f:
     f.write(outstr)
 
 w_circ = sp.simplify(sp.diff(h_real.subs(p_r,0),p_phi))
@@ -90,7 +91,7 @@ def _w_circ(self, r, p_phi, nu, constants):
     d = self._d_potential(r, constants)
 {nrpy_pycode}    return w_circ
 """
-with open('w_circ.txt','w') as f:
+with open(os.path.join(outfolder,'w_circ.txt'),'w') as f:
     f.write(outstr)
 
 
@@ -159,7 +160,7 @@ def _set_eob_constants_3PN(self, nu):
     }}
 """
 
-with open('set_eob_constants_3PN.txt','w') as f:
+with open(os.path.join(outfolder,'set_eob_constants_3PN.txt'),'w') as f:
     f.write(outstr)
 
 # write the proper strain expression
@@ -210,5 +211,5 @@ def _strain(self, point , nu , constants):
     return strain
 """
 
-with open('strain.txt','w') as f:
+with open(os.path.join(outfolder,'strain.txt'),'w') as f:
     f.write(outstr)

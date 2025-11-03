@@ -1,5 +1,7 @@
+import os
 import sympy as sp
 from nrpy.c_codegen import c_codegen as ccg
+outfolder = 'codegen_3pn'
 nu = sp.Symbol('nu',real=True)
 F_2 , F_3 , F_4 , F_5 , F_6 , F_7 = sp.symbols('F_2 F_3 F_4 F_5 F_6 F_7',real=True)
 F_6_l = sp.symbols('F_6_l',real=True)
@@ -42,5 +44,5 @@ def _flux(self, v, nu, constants):
 {nrpy_pycode}
     return flux
 """
-with open('flux.txt','w') as f:
+with open(os.path.join(outfolder,'flux.txt'),'w') as f:
     f.write(out_str)
