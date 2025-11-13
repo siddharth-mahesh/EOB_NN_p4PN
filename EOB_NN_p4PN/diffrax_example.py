@@ -1,3 +1,5 @@
+# Example module to test diffrax
+
 import jax
 import jax.numpy as jnp
 import diffrax
