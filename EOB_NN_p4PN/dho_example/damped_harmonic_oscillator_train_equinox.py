@@ -12,7 +12,7 @@ from dho_dhnn_jax import DHNN_Model
 def train_dhnn_model(
     train_data: Tuple[jnp.ndarray, jnp.ndarray],
     val_data: Tuple[jnp.ndarray, jnp.ndarray],
-    model_params: Dict[str, Union[int, jaxlib._jax.ArrayImpl]],
+    model_params: Dict[str, int],
     training_params: Dict[str, Union[int, float]],
 ) -> DHNN_Model:
     """Trains the DHNN model using the provided data and parameters.
