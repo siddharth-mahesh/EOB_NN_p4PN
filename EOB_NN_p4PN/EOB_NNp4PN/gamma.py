@@ -1,3 +1,4 @@
+# Create a JAX-compliant complex gamma function
 import jax.numpy as jnp
 
 g = 7
@@ -26,5 +27,5 @@ def gamma(z):
     return y
 
 if __name__ == "__main__":
-    print(gamma(1))
+    print(gamma(5))
     print(gamma(1 + 1j))

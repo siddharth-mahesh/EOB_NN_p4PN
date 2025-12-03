@@ -1,7 +1,7 @@
 import os
 import sympy as sp 
 from nrpy.c_codegen import c_codegen as ccg
-outfolder = 'codegen_3pn'
+outfolder = 'EOB_NN_p4PN/codegen_3pn'
 a_0 , a_1 , a_3 , a_4 , a_5 , x = sp.symbols('a_0 a_1 a_3 a_4 a_5 x',real = True)
 pade_1_4 = (
     (
@@ -99,7 +99,8 @@ def pade_1_4(self,a_1, a_3, a_4, a_5, x):
 with open(os.path.join(outfolder,'pade_1_4.txt'), 'w') as f:
     f.write(nrpy_pycode)
 
-pade_1_3 = (
+# Pade 1,3 for A potential
+pade_1_3_A = (
     (
         (
             (
@@ -144,8 +145,8 @@ pade_1_3 = (
     )
 )
 
-pade_1_3_ccode = ccg(pade_1_3, 'pade_1_3',include_braces=False,verbose=False)
-pade_1_3_pycode = f"""
+pade_1_3_A_ccode = ccg(pade_1_3_A, 'pade_1_3',include_braces=False,verbose=False)
+pade_1_3_A_pycode = f"""
 def pade_1_3(self,x,a_1, a_3, a_4):
     \"\"\"
     Compute the Pade approximant P^{1}_{3} for the Hamiltonian A potential.
@@ -161,7 +162,7 @@ def pade_1_3(self,x,a_1, a_3, a_4):
     Returns:
         float: Pade approximant P^{1}_{3} evaluated at x.
     \"\"\"
-{pade_1_3_ccode.replace(
+{pade_1_3_A_ccode.replace(
     'const REAL ', '    '
 ).replace(
     ';', ''
@@ -169,6 +170,53 @@ def pade_1_3(self,x,a_1, a_3, a_4):
     'pade_1_3', '    pade_1_3'
 )}    return pade_1_3
 """
-with open(os.path.join(outfolder,'pade_1_3.txt'), 'w') as f:
-    f.write(pade_1_3_pycode)
+with open(os.path.join(outfolder,'pade_1_3_A.txt'), 'w') as f:
+    f.write(pade_1_3_A_pycode)
+
+# Pade 1,3 for D potential
+d_2 , d_3 , d_4 = sp.symbols('d_2 d_3 d_4',real = True)
+pade_1_3_D = (
+    (
+        (
+            (d_2**2 - d_4) * x
+        )/d_3 + 1
+    )/(
+        (
+            (-d_2**3 + d_4 * d_2 - d_3**2) * x**3
+        )/d_3 
+        - d_2 * x**2 
+        + (
+            (d_2**2 - d_4) * x
+        )/d_3 
+        + 1
+    )
+)
+pade_1_3_D_ccode = ccg(pade_1_3_D, 'pade_1_3',include_braces=False,verbose=False)
+pade_1_3_D_pycode = f"""
+def pade_1_3(self,x,d_2, d_3, d_4):
+    \"\"\"
+    Compute the Pade approximant P^{1}_{3} for the Hamiltonian D potential.
+    The Hamiltonian D potential is given by a polynomial of the form
+    p(x) = 1 + d_2 x^2 + d_3 x^3 + d_4 x^4
+
+    Args:
+        x (float): Input tensor, typically 1/r.
+        d_2 (float): Coefficient d_2.
+        d_3 (float): Coefficient d_3.
+        d_4 (float): Coefficient d_4.
+
+    Returns:
+        float: Pade approximant P^{1}_{3} evaluated at x.
+    \"\"\"
+{pade_1_3_D_ccode.replace(
+    'const REAL ', '    '
+).replace(
+    ';', ''
+).replace(
+    'pade_1_3', '    pade_1_3'
+)}    return pade_1_3
+"""
+with open(os.path.join(outfolder,'pade_1_3_D.txt'), 'w') as f:
+    f.write(pade_1_3_D_pycode)
+
 

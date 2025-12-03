@@ -1,0 +1,20 @@
+
+def pade_1_3(self,x,d_2, d_3, d_4):
+    """
+    Compute the Pade approximant P^1_3 for the Hamiltonian D potential.
+    The Hamiltonian D potential is given by a polynomial of the form
+    p(x) = 1 + d_2 x^2 + d_3 x^3 + d_4 x^4
+
+    Args:
+        x (float): Input tensor, typically 1/r.
+        d_2 (float): Coefficient d_2.
+        d_3 (float): Coefficient d_3.
+        d_4 (float): Coefficient d_4.
+
+    Returns:
+        float: Pade approximant P^1_3 evaluated at x.
+    """
+    tmp0 = (1.0/(d_3))
+    tmp1 = tmp0*x*(((d_2)*(d_2)) - d_4) + 1
+    pade_1_3 = tmp1/(-d_2*((x)*(x)) + tmp0*((x)*(x)*(x))*(-((d_2)*(d_2)*(d_2)) + d_2*d_4 - ((d_3)*(d_3))) + tmp1)
+    return pade_1_3
