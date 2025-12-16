@@ -1,5 +1,7 @@
 # HPC job logs
 logs/
+*.sh
+*.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
