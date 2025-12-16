@@ -1,9 +1,10 @@
 """
-This file contains the EOB_NN_p4PN class,
+This file contains the Neural_EOB class,
 which implements the non-spinning 3PN Effective One Body model
 with 3.5PN circular radiation-reaction
-and neural post 4PN terms.
+and neural post-4PN terms.
 """
+
 I = 1j
 import jax
 import jax.numpy as jnp
@@ -13,6 +14,7 @@ from EOB_NN_p4PN.EOB.pade_1_3_a import _pade_1_3
 from EOB_NN_p4PN.EOB.pade_0_3_d import _pade_0_3
 from EOB_NN_p4PN.EOB.eob_constants_3pn import _set_eob_constants_3PN
 from EOB_NN_p4PN.EOB.strain import _strain
+
 # set jax to 64 bit precision
 jax.config.update("jax_enable_x64", True)
 import diffrax
@@ -27,8 +29,9 @@ class Neural_EOB(eqx.Module):
     """
     This class implements the non-spinning 3PN Effective One Body model
     with 3.5PN circular radiation-reaction
-    and neural post 4PN terms.
+    and neural post-4PN terms.
     """
+
     conservative_order: int
     radiative_order: float
     A_p4PN: MLP
@@ -39,22 +42,41 @@ class Neural_EOB(eqx.Module):
     _pade_d: Callable
     _set_eob_constants_3PN: Callable
     _strain: Callable
-    
-    def __init__(self, key = jax.random.PRNGKey(42),hidden_dim_A = 16,hidden_dim_D = 16,hidden_dim_Q = 16,hidden_dim_h = 16):
+
+    def __init__(
+        self,
+        key=jax.random.PRNGKey(42),
+        hidden_dim_A=16,
+        hidden_dim_D=16,
+        hidden_dim_Q=16,
+        hidden_dim_h=16,
+    ):
         """
         Initialize the EOB class.
+        Args:
+            key (jax.random.PRNGKey): The random key for initialization.
+            hidden_dim_A (int): The dimension of the hidden layer for A potential.
+            hidden_dim_D (int): The dimension of the hidden layer for D potential.
+            hidden_dim_Q (int): The dimension of the hidden layer for Q potential.
+            hidden_dim_h (int): The dimension of the hidden layer for h potential.
         """
 
         # model identifiers
         self.conservative_order = 3
         self.radiative_order = 3.5
         A_key, D_key, Q_key = jax.random.split(key, 3)
-        self.A_p4PN = MLP(input_dim=2, output_dim='scalar', hidden_dim=hidden_dim_A, key=A_key)
-        self.D_p4PN = MLP(input_dim=2, output_dim='scalar', hidden_dim=hidden_dim_D, key=D_key)
-        self.Q_p4PN = MLP(input_dim=3, output_dim='scalar', hidden_dim=hidden_dim_Q, key=Q_key)
+        self.A_p4PN = MLP(
+            input_dim=2, output_dim="scalar", hidden_dim=hidden_dim_A, key=A_key
+        )
+        self.D_p4PN = MLP(
+            input_dim=2, output_dim="scalar", hidden_dim=hidden_dim_D, key=D_key
+        )
+        self.Q_p4PN = MLP(
+            input_dim=3, output_dim="scalar", hidden_dim=hidden_dim_Q, key=Q_key
+        )
         self._flux = _flux
-        self._pade_a = _pade_1_3   # Pade approximant for A potential
-        self._pade_d = _pade_0_3   # Pade approximant for D potential
+        self._pade_a = _pade_1_3  # Pade approximant for A potential
+        self._pade_d = _pade_0_3  # Pade approximant for D potential
         self._set_eob_constants_3PN = _set_eob_constants_3PN
         self._strain = _strain
 
@@ -71,8 +93,10 @@ class Neural_EOB(eqx.Module):
             float: Hamiltonian A potential
         """
         u = 1 / r
-        neural_in = jnp.array([u,nu])
-        a = self._pade_a(u, constants["a_1"], constants["a_3"], constants["a_4"]) * (1 + self.A_p4PN(neural_in))
+        neural_in = jnp.array([u, nu])
+        a = self._pade_a(u, constants["a_1"], constants["a_3"], constants["a_4"]) * (
+            1 + self.A_p4PN(neural_in)
+        )
         return a
 
     def _d_potential(self, r, nu, constants):
@@ -87,8 +111,10 @@ class Neural_EOB(eqx.Module):
             float: Hamiltonian D potential
         """
         u = 1 / r
-        neural_in = jnp.array([u,nu])
-        d = self._pade_d(u, constants["d_2"], constants["d_3"]) * (1 + self.D_p4PN(neural_in))
+        neural_in = jnp.array([u, nu])
+        d = self._pade_d(u, constants["d_2"], constants["d_3"]) * (
+            1 + self.D_p4PN(neural_in)
+        )
         return d
 
     def _hamiltonian(self, y, nu, constants):
@@ -103,16 +129,38 @@ class Neural_EOB(eqx.Module):
         Returns:
             float: Hamiltonian evaluated at y.
         """
-        r , phi , p_r , p_phi = y
+        r, phi, p_r, p_phi = y
         u = 1 / r
-        neural_q_in = jnp.array([nu,u,p_r])
-        z_3 = constants['z_3']
-        a = self._a_potential(r,nu, constants)
-        d = self._d_potential(r,nu, constants)
+        neural_q_in = jnp.array([nu, u, p_r])
+        z_3 = constants["z_3"]
+        a = self._a_potential(r, nu, constants)
+        d = self._d_potential(r, nu, constants)
         q_p4pn = self.Q_p4PN(neural_q_in)
-        h_real = jnp.sqrt(2*nu*(jnp.sqrt(a*(((p_phi)*(p_phi))*((u)*(u)) + ((p_r)*(p_r))*(a/d + ((p_r)*(p_r))*(((u)*(u))*z_3*(1 + q_p4pn))) + 1)) - 1) + 1)/nu
+        h_real = (
+            jnp.sqrt(
+                2
+                * nu
+                * (
+                    jnp.sqrt(
+                        a
+                        * (
+                            ((p_phi) * (p_phi)) * ((u) * (u))
+                            + ((p_r) * (p_r))
+                            * (
+                                a / d
+                                + ((p_r) * (p_r)) * (((u) * (u)) * z_3 * (1 + q_p4pn))
+                            )
+                            + 1
+                        )
+                    )
+                    - 1
+                )
+                + 1
+            )
+            / nu
+        )
         return h_real
-    
+
     def _c_potential(self, r, p_phi, nu, constants):
         """
         Compute the Hamiltonian C potential.
@@ -136,7 +184,7 @@ class Neural_EOB(eqx.Module):
         c_circ = jnp.pow(a, 3.0 / 2.0) / (d * jnp.sqrt(tmp0 * tmp2 + tmp0 + tmp2 + 1))
         return c_circ
 
-    def _j(self, r,nu, constants):
+    def _j(self, r, nu, constants):
         """
         Compute the circular orbit angular momentum.
 
@@ -148,8 +196,8 @@ class Neural_EOB(eqx.Module):
             float: Circular orbit angular momentum
         """
         r3 = r * r * r
-        a = self._a_potential(r,nu, constants)
-        da_dr = jax.grad(self._a_potential, argnums=0)(r,nu, constants)
+        a = self._a_potential(r, nu, constants)
+        da_dr = jax.grad(self._a_potential, argnums=0)(r, nu, constants)
         j = jnp.sqrt(r3 * da_dr / (2 * a - r * da_dr))
         return j
 
@@ -165,7 +213,7 @@ class Neural_EOB(eqx.Module):
         Returns:
             float: Circular orbit Hamiltonian
         """
-        j = self._j(r,nu, constants)
+        j = self._j(r, nu, constants)
         z_circ = jnp.array([r, 0.0, 0.0, j])
         h_circ = self._hamiltonian(z_circ, nu, constants)
         return h_circ
@@ -200,7 +248,7 @@ class Neural_EOB(eqx.Module):
             float: Circular orbit condition
         """
         nu, omega_0, constants = params
-        j = self._j(r,nu, constants)
+        j = self._j(r, nu, constants)
         y = jnp.array([r, 0.0, 0.0, j])
         d_h_real = jax.grad(self._hamiltonian, argnums=0)(y, nu, constants)
         phidot = d_h_real[3]  # omega = d_h_real/d_p_phi
@@ -234,9 +282,14 @@ class Neural_EOB(eqx.Module):
         """
         nu, omega_0 = x
         constants = self._set_eob_constants_3PN(nu)
-        r0 = optimistix.root_find(self._circular_orbit_condition, optimistix.Newton(1e-12,1e-12), omega_0 ** (-2 / 3), (nu, omega_0, constants)).value
+        r0 = optimistix.root_find(
+            self._circular_orbit_condition,
+            optimistix.Newton(1e-12, 1e-12),
+            omega_0 ** (-2 / 3),
+            (nu, omega_0, constants),
+        ).value
         pr0 = self._pr_adiabatic(r0, nu, omega_0, constants)
-        pphi0 = self._j(r0,nu, constants)
+        pphi0 = self._j(r0, nu, constants)
         return jnp.array([r0, 0.0, pr0, pphi0])
 
     def _eom(self, t, y, args):
@@ -263,7 +316,7 @@ class Neural_EOB(eqx.Module):
         omega = d_h_real[3]  # omega = d_h_real/d_p_phi
         v = omega ** (1.0 / 3.0)
         flux = self._flux(v, nu, constants)
-        ydot = symplectic_map @ d_h_real + jnp.array([0.,0.,0.,flux])
+        ydot = symplectic_map @ d_h_real + jnp.array([0.0, 0.0, 0.0, flux])
         return ydot
 
     def _event_fn(self, t, y, args, **kwargs):
@@ -295,7 +348,9 @@ class Neural_EOB(eqx.Module):
         Returns:
             jnp.ndarray: Trajectory of the system
         """
-        r_ISCO = optimistix.root_find(self._isco_condition, optimistix.Newton(1e-12,1e-12), 6.0,(nu, constants)).value
+        r_ISCO = optimistix.root_find(
+            self._isco_condition, optimistix.Newton(1e-12, 1e-12), 6.0, (nu, constants)
+        ).value
         params = (nu, r_ISCO, constants)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self._eom),
@@ -328,7 +383,7 @@ class Neural_EOB(eqx.Module):
             strain (complex): Complex GW strain.
         """
         return jax.vmap(self._strain, in_axes=(None, 0, None, None))(
-            self,trajectory, nu, constants
+            self, trajectory, nu, constants
         )
 
     def _single_pass(self, x):
@@ -350,7 +405,7 @@ class Neural_EOB(eqx.Module):
         strain = self._strain_from_dynamics(trajectory, nu, constants)
         strain_stack = jnp.reshape(strain, (strain.shape[0], 1))
         return jnp.hstack((times_stack, strain_stack), dtype=jnp.complex128)
-    
+
     def __call__(self, x):
         """
         Compute the GW strain for a given batch of parameters
@@ -363,36 +418,43 @@ class Neural_EOB(eqx.Module):
             strain (complex): Complex GW strain.
         """
         return jax.jit(jax.vmap(self._single_pass, in_axes=(0)))(x)
-        
+
 
 if __name__ == "__main__":
     from EOB_NN_p4PN.EOB_3PN.eob3pn import EOB
+
     eobnn = Neural_EOB(key=jax.random.PRNGKey(50))
     eob3pn = EOB()
     key = jax.random.PRNGKey(0)
-    idx_key , omega_key , nu_key = jax.random.split(key,3)
+    idx_key, omega_key, nu_key = jax.random.split(key, 3)
     num_cases = 2
-    omegas = 0.01 + 0.005*jax.random.uniform(omega_key,(num_cases,1))
-    nus = 0.1 + 0.15*jax.random.uniform(nu_key,(num_cases,1))
-    x = jnp.hstack((nus,omegas))
+    omegas = 0.01 + 0.005 * jax.random.uniform(omega_key, (num_cases, 1))
+    nus = 0.1 + 0.15 * jax.random.uniform(nu_key, (num_cases, 1))
+    x = jnp.hstack((nus, omegas))
     strain_series = eobnn(x)
     strain_series_3pn = eob3pn(x)
-    idx = jax.random.randint(idx_key,1,0,num_cases-1)[0]
-    times = strain_series[idx,:,0]
-    strain = strain_series[idx,:,1]
-    times_3pn = strain_series_3pn[idx,:,0]
-    strain_3pn = strain_series_3pn[idx,:,1]
+    idx = jax.random.randint(idx_key, 1, 0, num_cases - 1)[0]
+    times = strain_series[idx, :, 0]
+    strain = strain_series[idx, :, 1]
+    times_3pn = strain_series_3pn[idx, :, 0]
+    strain_3pn = strain_series_3pn[idx, :, 1]
 
     import matplotlib.pyplot as plt
-    fig , ax = plt.subplots(2,1, sharex=True, figsize=(8,10))
+
+    fig, ax = plt.subplots(2, 1, sharex=True, figsize=(8, 10))
     fig.subplots_adjust(hspace=0)
-    ax[0].plot(jnp.abs(times),jnp.abs(strain),label = 'Neural')
-    ax[0].plot(jnp.abs(times_3pn),jnp.abs(strain_3pn),label = '3PN',linestyle='dashed')
-    ax[1].plot(jnp.abs(times),jnp.unwrap(jnp.angle(strain)),label = 'Neural')
-    ax[1].plot(jnp.abs(times_3pn),jnp.unwrap(jnp.angle(strain_3pn)),label = '3PN',linestyle='dashed')
-    ax[0].set_ylabel(r'$A$')
-    ax[1].set_xlabel('Time')
-    ax[1].set_ylabel(r'$\phi$')
+    ax[0].plot(jnp.abs(times), jnp.abs(strain), label="Neural")
+    ax[0].plot(jnp.abs(times_3pn), jnp.abs(strain_3pn), label="3PN", linestyle="dashed")
+    ax[1].plot(jnp.abs(times), jnp.unwrap(jnp.angle(strain)), label="Neural")
+    ax[1].plot(
+        jnp.abs(times_3pn),
+        jnp.unwrap(jnp.angle(strain_3pn)),
+        label="3PN",
+        linestyle="dashed",
+    )
+    ax[0].set_ylabel(r"$A$")
+    ax[1].set_xlabel("Time")
+    ax[1].set_ylabel(r"$\phi$")
     ax[1].legend()
-    plt.savefig('eob_nnp4pn.png')
+    plt.savefig("eob_nnp4pn.png")
     plt.show()
