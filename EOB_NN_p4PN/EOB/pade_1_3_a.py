@@ -1,4 +1,4 @@
-def _pade_1_3(x, a_1, a_3, a_4):
+def pade_1_3(x, a_1, a_3, a_4):
     """
     Compute the Pade approximant P^1_3 for the Hamiltonian A potential.
     The Hamiltonian A potential is given by a polynomial of the form

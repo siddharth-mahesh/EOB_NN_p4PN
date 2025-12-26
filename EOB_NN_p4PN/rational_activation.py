@@ -48,7 +48,9 @@ if __name__ == "__main__":
     model_key, data_key = jax.random.split(key)
     activation = RationalActivation(model_key, features=5, degree_of_p=4, degree_of_q=5)
     x_input = jax.random.normal(data_key, (5,))
+    print(x_input.shape)
     output = activation(x_input)
+    print(output.shape)
     def loss_fn(model, x):
         pred = model(x)
         return jnp.sum(pred ** 2)

@@ -6,7 +6,7 @@ from EOB_NN_p4PN.gamma import gamma as tgamma
 jax.config.update("jax_enable_x64", True)
 I = 1j
 
-def _strain(self,point, nu, constants):
+def strain(self,point, nu, constants):
     """
     Calculate the EOB factorized resummed strain.
 
@@ -30,8 +30,9 @@ def _strain(self,point, nu, constants):
     e_gamma = constants["e_gamma"]
     r0 = 2 / jnp.sqrt(jnp.e)
     # t and r_ISCO don't matter here
-    Omega = self._eom(0, point, (nu, 0, constants))[1]
-    H = nu * self._hamiltonian(point, nu, constants)
+    H , dH = jax.value_and_grad(self._hamiltonian, argnums=0)(point, nu, constants)
+    Omega = dH[3]
+    H = nu * H
     tmp0 = jnp.pow(Omega, 2.0 / 3.0)
     tmp2 = 4 * I * H * Omega
     h22 = (

@@ -35,7 +35,7 @@ class RationalNet(eqx.Module):
         self.activation = RationalActivation(key=key2, features=hidden_dim, degree_of_p=degree_of_p, degree_of_q=degree_of_q)
         self.scalarizer = eqx.nn.Linear(hidden_dim, "scalar", key=key3)
 
-    def _single_forward(self, x):
+    def __call__(self, x):
         """
         Compute the forward pass for a single input.
         """
@@ -43,8 +43,10 @@ class RationalNet(eqx.Module):
         h = self.activation(h)
         return self.scalarizer(h)
 
-    def __call__(self, x):
-        """
-        Compute the forward pass for a batch of inputs.
-        """
-        return jax.vmap(self._single_forward, in_axes=0)(x)
+if __name__ == "__main__":
+    key = jax.random.PRNGKey(42)
+    key , key_x = jax.random.split(key, 2)
+    rational_net = RationalNet(key, input_dim=2, hidden_dim=16, degree_of_p=2, degree_of_q=2)
+    x = jax.random.normal(key_x, (2,))
+    print(x.shape)
+    print(rational_net(x).shape)

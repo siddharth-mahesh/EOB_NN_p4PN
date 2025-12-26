@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.numpy import log
 jax.config.update("jax_enable_x64", True)
-def _set_eob_constants_3PN(nu):
+def set_eob_constants_3PN(nu):
     """
     Calculate the dictionary of EOB constants.
 

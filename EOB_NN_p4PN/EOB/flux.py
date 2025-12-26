@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
-def _flux(v, nu, constants):
+def flux(v, nu, constants):
     """
     Compute the circular gravitational flux at the 3.5 PN order
 

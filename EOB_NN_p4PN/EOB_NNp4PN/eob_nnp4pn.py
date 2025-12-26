@@ -9,11 +9,11 @@ I = 1j
 import jax
 import jax.numpy as jnp
 from jax.numpy import log
-from EOB_NN_p4PN.EOB.flux import _flux
-from EOB_NN_p4PN.EOB.pade_1_3_a import _pade_1_3
-from EOB_NN_p4PN.EOB.pade_0_3_d import _pade_0_3
-from EOB_NN_p4PN.EOB.eob_constants_3pn import _set_eob_constants_3PN
-from EOB_NN_p4PN.EOB.strain import _strain
+from EOB_NN_p4PN.EOB.flux import flux
+from EOB_NN_p4PN.EOB.pade_1_3_a import pade_1_3
+from EOB_NN_p4PN.EOB.pade_0_3_d import pade_0_3
+from EOB_NN_p4PN.EOB.eob_constants_3pn import set_eob_constants_3PN
+from EOB_NN_p4PN.EOB.strain import strain
 
 # set jax to 64 bit precision
 jax.config.update("jax_enable_x64", True)
@@ -22,6 +22,7 @@ import optimistix
 import equinox as eqx
 
 from EOB_NN_p4PN.mlp import MLP
+from EOB_NN_p4PN.rational_net import RationalNet
 from typing import Callable
 
 
@@ -34,9 +35,12 @@ class Neural_EOB(eqx.Module):
 
     conservative_order: int
     radiative_order: float
-    A_p4PN: MLP
-    D_p4PN: MLP
-    Q_p4PN: MLP
+    srate: int
+    A_p4PN: RationalNet
+    D_p4PN: RationalNet
+    Q_p4PN: RationalNet
+    f_p4PN: RationalNet
+    delta_p4PN: RationalNet
     _flux: Callable
     _pade_a: Callable
     _pade_d: Callable
@@ -45,40 +49,77 @@ class Neural_EOB(eqx.Module):
 
     def __init__(
         self,
-        key=jax.random.PRNGKey(42),
-        hidden_dim_A=16,
-        hidden_dim_D=16,
-        hidden_dim_Q=16,
-        hidden_dim_h=16,
+        key:jax.random.PRNGKey=jax.random.PRNGKey(42),
+        srate:int=8192,
+        hidden_dim_A:int=5,
+        hidden_dim_D:int=5,
+        hidden_dim_Q:int=5,
+        hidden_dim_f:int=5,
+        hidden_dim_delta:int=5,
     ):
         """
         Initialize the EOB class.
         Args:
             key (jax.random.PRNGKey): The random key for initialization.
+            srate (int): The sampling rate for the strain.
             hidden_dim_A (int): The dimension of the hidden layer for A potential.
             hidden_dim_D (int): The dimension of the hidden layer for D potential.
             hidden_dim_Q (int): The dimension of the hidden layer for Q potential.
-            hidden_dim_h (int): The dimension of the hidden layer for h potential.
+            hidden_dim_f (int): The dimension of the hidden layer for f potential.
+            hidden_dim_delta (int): The dimension of the hidden layer for delta potential.
         """
 
         # model identifiers
         self.conservative_order = 3
         self.radiative_order = 3.5
-        A_key, D_key, Q_key = jax.random.split(key, 3)
-        self.A_p4PN = MLP(
-            input_dim=2, output_dim="scalar", hidden_dim=hidden_dim_A, key=A_key
+        self.srate = srate
+        A_key, D_key, Q_key, f_key, delta_key = jax.random.split(key, 5)
+        self.A_p4PN = RationalNet(
+            key=A_key,
+            input_dim=2,
+            hidden_dim=hidden_dim_A,
+            degree_of_p=2,
+            degree_of_q=3,
         )
-        self.D_p4PN = MLP(
-            input_dim=2, output_dim="scalar", hidden_dim=hidden_dim_D, key=D_key
+        self.D_p4PN = RationalNet(
+            key=D_key,
+            input_dim=2,
+            hidden_dim=hidden_dim_D,
+            degree_of_p=2,
+            degree_of_q=3,
         )
-        self.Q_p4PN = MLP(
-            input_dim=3, output_dim="scalar", hidden_dim=hidden_dim_Q, key=Q_key
+        self.Q_p4PN = RationalNet(
+            key=Q_key,
+            input_dim=3,
+            hidden_dim=hidden_dim_Q,
+            degree_of_p=2,
+            degree_of_q=3,
         )
-        self._flux = _flux
-        self._pade_a = _pade_1_3  # Pade approximant for A potential
-        self._pade_d = _pade_0_3  # Pade approximant for D potential
-        self._set_eob_constants_3PN = _set_eob_constants_3PN
-        self._strain = _strain
+        self.f_p4PN = RationalNet(
+            key=f_key,
+            input_dim=2,
+            hidden_dim=hidden_dim_f,
+            degree_of_p=2,
+            degree_of_q=3,
+        )
+        self.delta_p4PN = RationalNet(
+            key=delta_key,
+            input_dim=2,
+            hidden_dim=hidden_dim_delta,
+            degree_of_p=2,
+            degree_of_q=3,
+        )
+        self._set_eob_constants_3PN = set_eob_constants_3PN
+        self._pade_a = pade_1_3
+        self._pade_d = pade_0_3
+
+    def _strain(self, point, nu, constants):
+        Omega = jax.grad(self._hamiltonian, argnums=0)(point, nu, constants)[3]
+        return strain(self,point, nu, constants)*(1 + self.f_p4PN(jnp.array([Omega, nu])))*jnp.exp(I*jnp.pow(Omega,7.0/3.0)*self.delta_p4PN(jnp.array([Omega, nu])))
+
+    def _flux(self, y, nu, constants):
+        Omega = jax.grad(self._hamiltonian, argnums=0)(y, nu, constants)[3]
+        return -Omega*jnp.abs(self._strain(y, nu, constants))**2/(2*jnp.pi*nu)
 
     def _a_potential(self, r, nu, constants):
         """
@@ -231,8 +272,8 @@ class Neural_EOB(eqx.Module):
         """
         j, dj_dr = jax.value_and_grad(self._j, argnums=0)(r, nu, constants)
         c = self._c_potential(r, j, nu, constants)
-        v_w = jnp.pow(omega_0, 1 / 3)
-        flux = self._flux(v_w, nu, constants)
+        y = jnp.array([r, 0.0, 0.0, j]) 
+        flux = self._flux(y, nu, constants)
         pr = flux / (c * dj_dr)
         return pr
 
@@ -305,7 +346,7 @@ class Neural_EOB(eqx.Module):
             jnp.ndarray: Equations of motion.
         """
         nu, _, constants = args
-        num_coords = len(y) // 2
+        num_coords = 2
         symplectic_map = jnp.block(
             [
                 [jnp.zeros((num_coords, num_coords)), jnp.eye(num_coords)],
@@ -315,7 +356,7 @@ class Neural_EOB(eqx.Module):
         d_h_real = jax.grad(self._hamiltonian, argnums=0)(y, nu, constants)
         omega = d_h_real[3]  # omega = d_h_real/d_p_phi
         v = omega ** (1.0 / 3.0)
-        flux = self._flux(v, nu, constants)
+        flux = self._flux(y, nu, constants)
         ydot = symplectic_map @ d_h_real + jnp.array([0.0, 0.0, 0.0, flux])
         return ydot
 
@@ -366,7 +407,7 @@ class Neural_EOB(eqx.Module):
             ),
             saveat=diffrax.SaveAt(t0=True, t1=True, dense=True),
         )
-        times = jnp.linspace(0, sol.ts[-1], 3000)
+        times = jnp.linspace(0, sol.ts[-1], self.srate)
         trajectory = jax.vmap(sol.evaluate, in_axes=0)(times)
         return times, trajectory
 
@@ -382,8 +423,8 @@ class Neural_EOB(eqx.Module):
         Returns:
             strain (complex): Complex GW strain.
         """
-        return jax.vmap(self._strain, in_axes=(None, 0, None, None))(
-            self, trajectory, nu, constants
+        return jax.vmap(self._strain, in_axes=(0, None, None))(
+            trajectory, nu, constants
         )
 
     def _single_pass(self, x):
@@ -405,6 +446,16 @@ class Neural_EOB(eqx.Module):
         strain = self._strain_from_dynamics(trajectory, nu, constants)
         strain_stack = jnp.reshape(strain, (strain.shape[0], 1))
         return jnp.hstack((times_stack, strain_stack), dtype=jnp.complex128)
+    
+    def photon_effective_potential(self,r_grid,nu):
+        constants = self._set_eob_constants_3PN(nu)
+        a = jax.vmap(self._a_potential, in_axes=(0, None, None))(r_grid,nu,constants)
+        return a/r_grid**2
+
+    def particle_effective_potential(self,r_grid,j_grid,nu):
+        constants = self._set_eob_constants_3PN(nu)
+        a = jax.vmap(self._a_potential, in_axes=(0, None, None))(r_grid,nu,constants)
+        return a*(1 + j_grid/r_grid**2)
 
     def __call__(self, x):
         """
@@ -422,16 +473,17 @@ class Neural_EOB(eqx.Module):
 
 if __name__ == "__main__":
     from EOB_NN_p4PN.EOB_3PN.eob3pn import EOB
-
-    eobnn = Neural_EOB(key=jax.random.PRNGKey(50))
+    srate = 8192
+    eobnn = Neural_EOB(key=jax.random.PRNGKey(50),srate=srate)
     eob3pn = EOB()
-    key = jax.random.PRNGKey(0)
+    key = jax.random.PRNGKey(42)
     idx_key, omega_key, nu_key = jax.random.split(key, 3)
     num_cases = 2
     omegas = 0.01 + 0.005 * jax.random.uniform(omega_key, (num_cases, 1))
     nus = 0.1 + 0.15 * jax.random.uniform(nu_key, (num_cases, 1))
     x = jnp.hstack((nus, omegas))
     strain_series = eobnn(x)
+    print(f"strain_series.shape: {strain_series.shape}")
     strain_series_3pn = eob3pn(x)
     idx = jax.random.randint(idx_key, 1, 0, num_cases - 1)[0]
     times = strain_series[idx, :, 0]
@@ -457,4 +509,14 @@ if __name__ == "__main__":
     ax[1].set_ylabel(r"$\phi$")
     ax[1].legend()
     plt.savefig("eob_nnp4pn.png")
-    plt.show()
+
+    rgrid = jnp.linspace(0.1, 10, 100)
+    agrid_nn = eobnn.photon_effective_potential(rgrid, nus[idx][0])
+    agrid_3pn = eob3pn.photon_effective_potential(rgrid, nus[idx][0])
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+    ax.plot(rgrid, agrid_nn, label="Neural")
+    ax.plot(rgrid, agrid_3pn, label="3PN", linestyle="dashed")
+    ax.set_xlabel("r")
+    ax.set_ylabel("A")
+    ax.legend()
+    plt.savefig("eob_nnp4pn_photon_effective_potential.png")

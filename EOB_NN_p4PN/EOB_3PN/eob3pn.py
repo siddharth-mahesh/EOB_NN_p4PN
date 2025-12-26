@@ -8,11 +8,11 @@ I = 1j
 import jax
 import jax.numpy as jnp
 from jax.numpy import log
-from EOB_NN_p4PN.EOB.flux import _flux
-from EOB_NN_p4PN.EOB.pade_1_3_a import _pade_1_3
-from EOB_NN_p4PN.EOB.pade_0_3_d import _pade_0_3
-from EOB_NN_p4PN.EOB.eob_constants_3pn import _set_eob_constants_3PN
-from EOB_NN_p4PN.EOB.strain import _strain
+from EOB_NN_p4PN.EOB.flux import flux
+from EOB_NN_p4PN.EOB.pade_1_3_a import pade_1_3
+from EOB_NN_p4PN.EOB.pade_0_3_d import pade_0_3
+from EOB_NN_p4PN.EOB.eob_constants_3pn import set_eob_constants_3PN
+from EOB_NN_p4PN.EOB.strain import strain
 # set jax to 64 bit precision
 jax.config.update("jax_enable_x64", True)
 import diffrax
@@ -29,11 +29,11 @@ class EOB:
         # model identifiers
         self.conservative_order = 3
         self.radiative_order = 3.5
-        self._flux = _flux
-        self._pade_a = _pade_1_3   # Pade approximant for A potential
-        self._pade_d = _pade_0_3   # Pade approximant for D potential
-        self._set_eob_constants_3PN = _set_eob_constants_3PN
-        self._strain = _strain
+        self._flux = flux
+        self._pade_a = pade_1_3   # Pade approximant for A potential
+        self._pade_d = pade_0_3   # Pade approximant for D potential
+        self._set_eob_constants_3PN = set_eob_constants_3PN
+        self._strain = strain
 
     def _a_potential(self, r, constants):
         """
@@ -342,6 +342,16 @@ class EOB:
         strain_stack = jnp.reshape(strain, (strain.shape[0], 1))
         return jnp.hstack((times_stack, strain_stack), dtype=jnp.complex128)
     
+    def photon_effective_potential(self,r_grid,nu):
+        constants = self._set_eob_constants_3PN(nu)
+        a = jax.vmap(self._a_potential, in_axes=(0, None))(r_grid,constants)
+        return a/r_grid**2
+
+    def particle_effective_potential(self,r_grid,j_grid,nu):
+        constants = self._set_eob_constants_3PN(nu)
+        a = jax.vmap(self._a_potential, in_axes=(0, None))(r_grid,constants)
+        return a*(1 + j_grid/r_grid**2)
+
     def __call__(self, x):
         """
         Compute the GW strain for a given batch of parameters
