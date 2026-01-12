@@ -318,8 +318,14 @@ class EOB:
         Returns:
             strain (complex): Complex GW strain.
         """
+        h , dh_real = jax.vmap(jax.value_and_grad(self._hamiltonian, argnums=0), in_axes=(0, None, None))(trajectory, nu, constants)
+        strain_qts = jnp.hstack([
+            trajectory[:,1].reshape(trajectory.shape[0],1),
+            h.reshape(h.shape[0],1)*nu,
+            dh_real[:,3].reshape(dh_real.shape[0],1)
+        ])
         return jax.vmap(self._strain, in_axes=(None, 0, None, None))(
-            self,trajectory, nu, constants
+            self,strain_qts, nu, constants
         )
 
     def _single_pass(self, x):

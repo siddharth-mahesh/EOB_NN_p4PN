@@ -9,6 +9,13 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# C compilation artifacts
+*.o
+*.a
+*.out
+SEBOB/seob/seobnrv5_aligned_spin_inspiral
+*.bin
+
 # C extensions
 *.so
 

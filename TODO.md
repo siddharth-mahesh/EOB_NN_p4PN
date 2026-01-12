@@ -7,6 +7,8 @@
 [] Waveform-based training - Train on NR waveforms to infer dynamics and waveform modes
     [x] Build dataloaders for NRSur and SXS.
     [] Train and visualize effective potentials.
+[] Code organization.
+    [] Add documentation.
 [] Literature.
     [] Introduction
     [] Setup

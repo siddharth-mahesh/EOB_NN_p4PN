@@ -1,0 +1,12 @@
+#### seobnrv5_aligned_spin_inspiral BH@H parameter file. NOTE: only commondata CodeParameters appear here ###
+###########################
+###########################
+### Module: nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients
+Delta_t_NS = 0.0             # (REAL)
+a6 = 0.0                     # (REAL)
+chi1 = 0.                   # (REAL)
+chi2 = 0.                  # (REAL)
+dt = 2.4627455127717882e-05  # (REAL)
+initial_omega = 0.01318      # (REAL)
+mass_ratio = 1               # (REAL)
+total_mass = 50              # (REAL)
