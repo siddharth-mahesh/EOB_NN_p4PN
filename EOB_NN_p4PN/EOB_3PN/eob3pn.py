@@ -212,6 +212,23 @@ class EOB:
         dhdr = lambda r: jax.grad(self._h_circ)(r, nu, constants)
         d2h_dr2 = jax.grad(dhdr)(r)
         return d2h_dr2
+    
+    def _lr_condition(self,r,params):
+        """
+        Solve for the LR condition for given nu and constants.
+
+        Args:
+            r (float): Radial position
+            params (tuple): Parameters given by (nu, constants)
+
+        Returns:
+            float: LR condition
+        """
+        nu, constants = params
+        # invert the sign on the photon effective potential to avoid any stable photon orbits
+        photon_eff = lambda r: -self._a_potential(r, constants) / r**2
+        lr_condition = jax.grad(photon_eff)(r)
+        return lr_condition
 
     def _initial_conditions(self, x):
         """
@@ -269,9 +286,9 @@ class EOB:
         Returns:
             float: ISCO event function.
         """
-        _, r_ISCO, _ = args
+        _, r_fin, _ = args
         r, _, _, _ = y
-        return r - r_ISCO
+        return r - r_fin
 
     def _dynamics(self, y0, nu, constants, dt=0.1):
         """
@@ -286,8 +303,9 @@ class EOB:
         Returns:
             jnp.ndarray: Trajectory of the system
         """
-        r_ISCO = optimistix.root_find(self._isco_condition, optimistix.Newton(1e-12,1e-12), 6.0,(nu, constants)).value
-        params = (nu, r_ISCO, constants)
+        #r_ISCO = optimistix.root_find(self._isco_condition, optimistix.Newton(1e-12,1e-12), 6.0,(nu, constants)).value
+        r_LR = optimistix.root_find(self._lr_condition, optimistix.Newton(1e-12,1e-12), 3.0,(nu, constants)).value 
+        params = (nu, r_LR, constants)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self._eom),
             diffrax.Dopri8(),
