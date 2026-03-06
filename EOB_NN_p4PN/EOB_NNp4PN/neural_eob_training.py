@@ -6,34 +6,92 @@ import jaxlib
 import jax.numpy as jnp
 import jax.scipy as jsp
 import optax
-from EOB_NN_p4PN.EOB_NNp4PN.eob_nnp4pn import Neural_EOB
+from EOB_NN_p4PN.EOB_NNp4PN.eob_nnp4pn_training_module import Neural_EOB
 
-def loss(model, x_pred,y_pred):
+def loss_stage_zero(model, x_pred,y_pred):
     y_model = model(x_pred)
-    return jnp.average(jax.vmap(physics_informed_loss)(y_pred,y_model))
+    batched_loss = jax.vmap(direct_waveform_loss, in_axes=(0,0))(y_pred,y_model)
+    return jnp.average(batched_loss)
 
-def physics_informed_loss(y_pred,y_model):
+def loss_first_stage(model, x_pred,y_pred):
+    y_model = model(x_pred)
+    batched_loss = jax.vmap(physics_informed_loss_preliminary, in_axes=(0,0))(y_pred,y_model)
+    return jnp.average(batched_loss)
+
+def loss_second_stage(model, x_pred,y_pred):
+    y_model = model(x_pred)
+    batched_loss = jax.vmap(physics_informed_loss, in_axes=(0,0))(y_pred,y_model)
+    return jnp.average(batched_loss)
+
+def direct_waveform_loss(y_pred,y_model):
+    t_end = jnp.min(jnp.array([jnp.real(y_pred[-1,0]),jnp.real(y_model[-1,0])]))
+    t_eval = jnp.linspace(0, t_end, 256)
+    h_pred = jnp.interp(t_eval, jnp.real(y_pred[:, 0]), y_pred[:, 1])
+    h_model = jnp.interp(t_eval, jnp.real(y_model[:, 0]), y_model[:, 1])
+    return jnp.mean(jnp.abs(h_pred - h_model)**2)
+
+def merger_time_loss(y_pred,y_model):
     """
-    Break down the loss into energy and dephasing loss.
-    The output data is given as a set of (timesteps,[time(t),strain(h(t))]).
-    The physics informed loss is given by a combination of
-    1. Energy loss: P_GW = |\dot{h_pred}|^2 - |\dot{h_model}|^2
-    2. Accumulated phase loss: \Delta \phi = \int_{t_0}^{t_f} (\phi_pred(t) - \phi_model(t)) dt
-    3. Merger time loss: \Delta t = t_{merge, pred} - t_{merge, model}
-
+    Compute the merger time loss, defined by
+    \Delta t = t_{merge, pred} - t_{merge, model}
+    
     Args:
         y_pred (jnp.ndarray): The trusted output.
         y_model (jnp.ndarray): The neural network outputs.
     """
     t_merger_pred = jnp.real(y_pred[-1, 0])
-    h_pred = y_pred[:, 1]
-    hdot_pred = jnp.gradient(h_pred, y_pred[:,0])
-    accumulated_phi_pred = jsp.integrate.trapezoid(jnp.unwrap(jnp.angle(h_pred)), y_pred[:,0])
     t_merger_model = jnp.real(y_model[-1, 0])
-    h_model = y_model[:, 1]
-    hdot_model = jnp.gradient(h_model, y_model[:,0])
-    accumulated_phi_model = jsp.integrate.trapezoid(jnp.unwrap(jnp.angle(h_model)), y_model[:,0])
-    return jnp.real(jnp.sum((jnp.abs(hdot_pred)**2 - jnp.abs(hdot_model)**2)**2 + (accumulated_phi_pred - accumulated_phi_model) ** 2 + (t_merger_pred - t_merger_model) ** 2))
+    # threshold merger time by allowable error margin
+    return ((t_merger_pred - t_merger_model)/5.) ** 2
+
+def physics_informed_loss(y_pred,y_model):
+    """
+    Break down the loss into energy and dephasing loss for final training(up to merger).
+    The output data is given as a set of (timesteps,[time(t),strain(h(t))]).
+    The physics informed loss is given by a combination of
+    1. Energy loss: \Delta E_GW = \int_{t=0}^{t_{merge}} (|\dot{h_pred}(t)|^2 - |\dot{h_model}(t)|^2) dt
+    2. Accumulated phase loss: \Delta \phi = \int_{t=0}^{t_{merge}} (\phi_pred(t) - \phi_model(t))^2 dt
+
+    Args:
+        y_pred (jnp.ndarray): The trusted output.
+        y_model (jnp.ndarray): The neural network outputs.
+    """
+    t_end = jnp.min(jnp.array([jnp.real(y_pred[-1,0]),jnp.real(y_model[-1,0])]))
+    t_eval = jnp.linspace(0, t_end, 1024)
+    h_pred = jnp.interp(t_eval, jnp.real(y_pred[:, 0]), y_pred[:, 1])
+    P_GW_pred = jnp.abs(jnp.gradient(h_pred, t_eval))**2
+    h_model = jnp.interp(t_eval, jnp.real(y_model[:, 0]), y_model[:, 1])
+    P_GW_model = jnp.abs(jnp.gradient(h_model, t_eval))**2
+    energy_squared_loss = jsp.integrate.trapezoid((P_GW_model - P_GW_pred)**2, t_eval)
+    accumulated_phase_squared_loss = jsp.integrate.trapezoid((jnp.unwrap(jnp.angle(h_pred)) - jnp.unwrap(jnp.angle(h_model)))**2, t_eval)
+    return accumulated_phase_squared_loss
+
+def physics_informed_loss_preliminary(y_pred,y_model):
+    """
+    Break down the loss into energy and dephasing loss for preliminary training(up to 500M).
+    The output data is given as a set of (timesteps,[time(t),strain(h(t))]).
+    The physics informed loss is given by a combination of
+    1. Energy loss: \Delta E_GW = \int_{t=0}^{t=500M} (|\dot{h_pred}(t)|^2 - |\dot{h_model}(t)|^2) dt
+    2. Accumulated phase loss: \Delta \phi = \int_{t=0}^{t=500M} (\phi_pred(t) - \phi_model(t))^2 dt
+
+    Args:
+        y_pred (jnp.ndarray): The trusted output.
+        y_model (jnp.ndarray): The neural network outputs.
+    """
+    t_eval = jnp.linspace(0, 500, 1024)
+    h_pred = jnp.interp(t_eval, jnp.real(y_pred[:, 0]), y_pred[:, 1])
+    P_GW_pred = jnp.abs(jnp.gradient(h_pred, t_eval))**2
+    h_model = jnp.interp(t_eval, jnp.real(y_model[:, 0]), y_model[:, 1])
+    P_GW_model = jnp.abs(jnp.gradient(h_model, t_eval))**2
+    energy_squared_loss = jsp.integrate.trapezoid((P_GW_model - P_GW_pred)**2, t_eval)
+    accumulated_phase_squared_loss = jsp.integrate.trapezoid(
+        (
+            jnp.unwrap(jnp.angle(h_pred)) 
+            - jnp.unwrap(jnp.angle(h_model))
+        )**2,
+        t_eval
+    )
+    return accumulated_phase_squared_loss #+ energy_squared_loss
 
 def train_dhnn_model(
     train_data: Tuple[jnp.ndarray, jnp.ndarray],
@@ -54,26 +112,41 @@ def train_dhnn_model(
     """
     key = model_params["key"]
     model = Neural_EOB(**model_params)
-    optimizer = optax.adam(learning_rate=training_params["learning_rate"])
+    optimizer = optax.optimistic_adam_v2(learning_rate=training_params["learning_rate"])
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
     x_train, y_train = train_data
     x_val, y_val = val_data
 
     @eqx.filter_jit
-    def step(
+    def step_stage_zero(
+        model,
+        opt_state,
+        x,
+        y
+    ):
+        loss_value, grads = eqx.filter_value_and_grad(loss_stage_zero)(model, x, y)
+        updates, opt_state = optimizer.update(
+            grads, opt_state, eqx.filter(model, eqx.is_array)
+        )
+        model = eqx.apply_updates(model, updates)
+        return model, opt_state, loss_value
+        
+
+    @eqx.filter_jit
+    def step_first_stage(
         model,
         opt_state,
         x,
         y,
     ):
-        loss_value, grads = eqx.filter_value_and_grad(loss)(model, x, y)
+        loss_value, grads = eqx.filter_value_and_grad(loss_first_stage)(model, x, y)
         updates, opt_state = optimizer.update(
             grads, opt_state, eqx.filter(model, eqx.is_array)
         )
         model = eqx.apply_updates(model, updates)
         return model, opt_state, loss_value
 
-    for epoch in range(training_params["epochs"]):
+    for epoch in range(training_params["stage_zero_epochs"]):
         key, key_train, key_val = jax.random.split(key, 3)
         # select training_params['batch_size'] samples from x_train and x_val
         train_sample_idx = jax.random.choice(
@@ -92,14 +165,14 @@ def train_dhnn_model(
         y_train_sample = jnp.take(y_train, train_sample_idx, axis=0)
         x_val_sample = jnp.take(x_val, val_sample_idx, axis=0)
         y_val_sample = jnp.take(y_val, val_sample_idx, axis=0)
-        model, opt_state, loss_value = step(
+        model, opt_state, loss_value = step_stage_zero(
             model, opt_state, x_train_sample, y_train_sample
         )
-        val_loss_value = loss(model, x_val_sample, y_val_sample)
-        if epoch % 100 == 0:
-            print(f"Epoch {epoch}, Loss: {loss_value}, Val Loss: {val_loss_value}")
-        if loss_value < 1e-7:
+        val_loss_value = loss_stage_zero(model, x_val_sample, y_val_sample)
+        print(f"Epoch {epoch}, Loss: {loss_value}, Val Loss: {val_loss_value}")
+        if loss_value < 1e-6:
             break
+
     return model
 
 
@@ -109,9 +182,11 @@ if __name__ == "__main__":
     seed = 0
     key = jax.random.PRNGKey(seed)
     training_params = {
-        "learning_rate": 1e-3,
-        "epochs": 5000,
-        "batch_size": 5,
+        "learning_rate": 1e-4,
+        "stage_zero_epochs": 500,
+        "stage_one_epochs": 500,
+        "stage_two_epochs": 500,
+        "batch_size": 10,
     }
     # model parameters
     model_params = {
@@ -122,4 +197,5 @@ if __name__ == "__main__":
     y_train = jnp.load("y_sxs_1em4.npy")
     x_val = jnp.load("x_sxs_1em3.npy")
     y_val = jnp.load("y_sxs_1em3.npy")
+    # train model
     trained_model = train_dhnn_model((x_train, y_train), (x_val, y_val), model_params, training_params)

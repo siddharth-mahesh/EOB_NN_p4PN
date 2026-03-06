@@ -8,8 +8,6 @@ MAYBE_UNUSED const REAL b_2_NQC = commondata.b_2_NQC;           // nrpy.infrastr
 MAYBE_UNUSED const REAL chi1 = commondata.chi1;                 // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::chi1
 MAYBE_UNUSED const REAL chi2 = commondata.chi2;                 // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::chi2
 MAYBE_UNUSED const REAL Delta_t = commondata.Delta_t;           // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t
-MAYBE_UNUSED const REAL Delta_t_NS = commondata.Delta_t_NS;     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_NS
-MAYBE_UNUSED const REAL Delta_t_S = commondata.Delta_t_S;       // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_S
 MAYBE_UNUSED const REAL dHreal_dpphi = commondata.dHreal_dpphi; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::dHreal_dpphi
 MAYBE_UNUSED const REAL dHreal_dpphi_circ =
     commondata.dHreal_dpphi_circ; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::dHreal_dpphi_circ
@@ -40,15 +38,36 @@ MAYBE_UNUSED const REAL nr_omega_2 = commondata.nr_omega_2; // nrpy.infrastructu
 MAYBE_UNUSED const int NUMGRIDS = commondata.NUMGRIDS;      // nrpy.grid::NUMGRIDS
 MAYBE_UNUSED const REAL Omega_circ = commondata.Omega_circ; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Omega_circ
 MAYBE_UNUSED const REAL omega_qnm = commondata.omega_qnm;   // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm
-MAYBE_UNUSED const REAL phi = commondata.phi;               // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
-MAYBE_UNUSED const REAL pphi = commondata.pphi;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
-MAYBE_UNUSED const REAL prstar = commondata.prstar;         // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::prstar
-MAYBE_UNUSED const REAL r = commondata.r;                   // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r
-MAYBE_UNUSED const REAL r_ISCO = commondata.r_ISCO;         // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r_ISCO
-MAYBE_UNUSED const REAL r_stop = commondata.r_stop;         // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r_stop
-MAYBE_UNUSED const REAL t_attach = commondata.t_attach;     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_attach
-MAYBE_UNUSED const REAL t_ISCO = commondata.t_ISCO;         // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_ISCO
-MAYBE_UNUSED const REAL t_stepback = commondata.t_stepback; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_stepback
-MAYBE_UNUSED const REAL tau_qnm = commondata.tau_qnm;       // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm
-MAYBE_UNUSED const REAL total_mass = commondata.total_mass; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::total_mass
-MAYBE_UNUSED const REAL xi = commondata.xi;                 // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::xi
+MAYBE_UNUSED const REAL omega_qnm_l2m1 =
+    commondata.omega_qnm_l2m1; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m1
+MAYBE_UNUSED const REAL omega_qnm_l2m2 =
+    commondata.omega_qnm_l2m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m2
+MAYBE_UNUSED const REAL omega_qnm_l3m2 =
+    commondata.omega_qnm_l3m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m2
+MAYBE_UNUSED const REAL omega_qnm_l3m3 =
+    commondata.omega_qnm_l3m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m3
+MAYBE_UNUSED const REAL omega_qnm_l4m3 =
+    commondata.omega_qnm_l4m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m3
+MAYBE_UNUSED const REAL omega_qnm_l4m4 =
+    commondata.omega_qnm_l4m4; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m4
+MAYBE_UNUSED const REAL omega_qnm_l5m5 =
+    commondata.omega_qnm_l5m5;                                  // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l5m5
+MAYBE_UNUSED const REAL phi = commondata.phi;                   // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
+MAYBE_UNUSED const REAL pphi = commondata.pphi;                 // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
+MAYBE_UNUSED const REAL prstar = commondata.prstar;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::prstar
+MAYBE_UNUSED const REAL r = commondata.r;                       // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r
+MAYBE_UNUSED const REAL r_ISCO = commondata.r_ISCO;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r_ISCO
+MAYBE_UNUSED const REAL r_stop = commondata.r_stop;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::r_stop
+MAYBE_UNUSED const REAL t_attach = commondata.t_attach;         // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_attach
+MAYBE_UNUSED const REAL t_ISCO = commondata.t_ISCO;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_ISCO
+MAYBE_UNUSED const REAL t_stepback = commondata.t_stepback;     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_stepback
+MAYBE_UNUSED const REAL tau_qnm = commondata.tau_qnm;           // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm
+MAYBE_UNUSED const REAL tau_qnm_l2m1 = commondata.tau_qnm_l2m1; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m1
+MAYBE_UNUSED const REAL tau_qnm_l2m2 = commondata.tau_qnm_l2m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m2
+MAYBE_UNUSED const REAL tau_qnm_l3m2 = commondata.tau_qnm_l3m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m2
+MAYBE_UNUSED const REAL tau_qnm_l3m3 = commondata.tau_qnm_l3m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m3
+MAYBE_UNUSED const REAL tau_qnm_l4m3 = commondata.tau_qnm_l4m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m3
+MAYBE_UNUSED const REAL tau_qnm_l4m4 = commondata.tau_qnm_l4m4; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m4
+MAYBE_UNUSED const REAL tau_qnm_l5m5 = commondata.tau_qnm_l5m5; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l5m5
+MAYBE_UNUSED const REAL total_mass = commondata.total_mass;     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::total_mass
+MAYBE_UNUSED const REAL xi = commondata.xi;                     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::xi

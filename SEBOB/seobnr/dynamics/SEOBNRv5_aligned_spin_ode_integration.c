@@ -184,7 +184,6 @@ void SEOBNRv5_aligned_spin_ode_integration(commondata_struct *restrict commondat
   // t_peak = dynamics[-1] if there is no peak
 
   REAL t_peak = times_fine_prelim[nsteps_fine_prelim - 1];
-
   // perform iterative refinement to find the true peak of the dynamics
   if (stop == OMEGA) {
     REAL *t_values = (REAL *)malloc(nsteps_fine_prelim * sizeof(REAL));
@@ -254,7 +253,6 @@ void SEOBNRv5_aligned_spin_ode_integration(commondata_struct *restrict commondat
     gsl_spline_free(spline);
     gsl_interp_accel_free(acc);
   }
-
   // interpolate the dynamics
 
   SEOBNRv5_aligned_spin_interpolate_dynamics(commondata, dynamics_fine_prelim, nsteps_fine_prelim, t_peak, stop);

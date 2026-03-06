@@ -18,12 +18,6 @@ const REAL NOSIMDchi2 = commondata->chi2;                              // nrpy.i
 MAYBE_UNUSED const REAL_SIMD_ARRAY chi2 = ConstSIMD(NOSIMDchi2);       // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::chi2
 const REAL NOSIMDDelta_t = commondata->Delta_t;                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t
 MAYBE_UNUSED const REAL_SIMD_ARRAY Delta_t = ConstSIMD(NOSIMDDelta_t); // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t
-const REAL NOSIMDDelta_t_NS = commondata->Delta_t_NS; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_NS
-MAYBE_UNUSED const REAL_SIMD_ARRAY Delta_t_NS =
-    ConstSIMD(NOSIMDDelta_t_NS);                    // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_NS
-const REAL NOSIMDDelta_t_S = commondata->Delta_t_S; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_S
-MAYBE_UNUSED const REAL_SIMD_ARRAY Delta_t_S =
-    ConstSIMD(NOSIMDDelta_t_S);                           // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_S
 const REAL NOSIMDdHreal_dpphi = commondata->dHreal_dpphi; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::dHreal_dpphi
 MAYBE_UNUSED const REAL_SIMD_ARRAY dHreal_dpphi =
     ConstSIMD(NOSIMDdHreal_dpphi); // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::dHreal_dpphi
@@ -90,10 +84,31 @@ MAYBE_UNUSED const REAL_SIMD_ARRAY Omega_circ =
     ConstSIMD(NOSIMDOmega_circ);                    // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Omega_circ
 const REAL NOSIMDomega_qnm = commondata->omega_qnm; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm
 MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm =
-    ConstSIMD(NOSIMDomega_qnm);                                      // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm
-const REAL NOSIMDphi = commondata->phi;                              // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
-MAYBE_UNUSED const REAL_SIMD_ARRAY phi = ConstSIMD(NOSIMDphi);       // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
-const REAL NOSIMDpphi = commondata->pphi;                            // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
+    ConstSIMD(NOSIMDomega_qnm);                               // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm
+const REAL NOSIMDomega_qnm_l2m1 = commondata->omega_qnm_l2m1; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m1
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l2m1 =
+    ConstSIMD(NOSIMDomega_qnm_l2m1);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m1
+const REAL NOSIMDomega_qnm_l2m2 = commondata->omega_qnm_l2m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m2
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l2m2 =
+    ConstSIMD(NOSIMDomega_qnm_l2m2);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m2
+const REAL NOSIMDomega_qnm_l3m2 = commondata->omega_qnm_l3m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m2
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l3m2 =
+    ConstSIMD(NOSIMDomega_qnm_l3m2);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m2
+const REAL NOSIMDomega_qnm_l3m3 = commondata->omega_qnm_l3m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m3
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l3m3 =
+    ConstSIMD(NOSIMDomega_qnm_l3m3);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m3
+const REAL NOSIMDomega_qnm_l4m3 = commondata->omega_qnm_l4m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m3
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l4m3 =
+    ConstSIMD(NOSIMDomega_qnm_l4m3);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m3
+const REAL NOSIMDomega_qnm_l4m4 = commondata->omega_qnm_l4m4; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m4
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l4m4 =
+    ConstSIMD(NOSIMDomega_qnm_l4m4);                          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m4
+const REAL NOSIMDomega_qnm_l5m5 = commondata->omega_qnm_l5m5; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l5m5
+MAYBE_UNUSED const REAL_SIMD_ARRAY omega_qnm_l5m5 =
+    ConstSIMD(NOSIMDomega_qnm_l5m5);                           // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l5m5
+const REAL NOSIMDphi = commondata->phi;                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
+MAYBE_UNUSED const REAL_SIMD_ARRAY phi = ConstSIMD(NOSIMDphi); // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
+const REAL NOSIMDpphi = commondata->pphi;                      // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
 MAYBE_UNUSED const REAL_SIMD_ARRAY pphi = ConstSIMD(NOSIMDpphi);     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
 const REAL NOSIMDprstar = commondata->prstar;                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::prstar
 MAYBE_UNUSED const REAL_SIMD_ARRAY prstar = ConstSIMD(NOSIMDprstar); // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::prstar
@@ -113,6 +128,27 @@ MAYBE_UNUSED const REAL_SIMD_ARRAY t_stepback =
     ConstSIMD(NOSIMDt_stepback);                // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_stepback
 const REAL NOSIMDtau_qnm = commondata->tau_qnm; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm
 MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm = ConstSIMD(NOSIMDtau_qnm); // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm
+const REAL NOSIMDtau_qnm_l2m1 = commondata->tau_qnm_l2m1; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m1
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l2m1 =
+    ConstSIMD(NOSIMDtau_qnm_l2m1);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m1
+const REAL NOSIMDtau_qnm_l2m2 = commondata->tau_qnm_l2m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m2
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l2m2 =
+    ConstSIMD(NOSIMDtau_qnm_l2m2);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m2
+const REAL NOSIMDtau_qnm_l3m2 = commondata->tau_qnm_l3m2; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m2
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l3m2 =
+    ConstSIMD(NOSIMDtau_qnm_l3m2);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m2
+const REAL NOSIMDtau_qnm_l3m3 = commondata->tau_qnm_l3m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m3
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l3m3 =
+    ConstSIMD(NOSIMDtau_qnm_l3m3);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m3
+const REAL NOSIMDtau_qnm_l4m3 = commondata->tau_qnm_l4m3; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m3
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l4m3 =
+    ConstSIMD(NOSIMDtau_qnm_l4m3);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m3
+const REAL NOSIMDtau_qnm_l4m4 = commondata->tau_qnm_l4m4; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m4
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l4m4 =
+    ConstSIMD(NOSIMDtau_qnm_l4m4);                        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m4
+const REAL NOSIMDtau_qnm_l5m5 = commondata->tau_qnm_l5m5; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l5m5
+MAYBE_UNUSED const REAL_SIMD_ARRAY tau_qnm_l5m5 =
+    ConstSIMD(NOSIMDtau_qnm_l5m5);                    // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l5m5
 const REAL NOSIMDtotal_mass = commondata->total_mass; // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::total_mass
 MAYBE_UNUSED const REAL_SIMD_ARRAY total_mass =
     ConstSIMD(NOSIMDtotal_mass);                             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::total_mass

@@ -144,6 +144,7 @@ pade_1_3_A = (
         + 1
     )
 )
+pade_1_3_A = (a_1**4 * x + 2 * a_3 * a_1 * x - a_4 * x + a_1**3 + a_3)/(-a_3**2 * x**3 - a_1**2 * x**2 * (a_4 * x + a_3) - a_4 * x + a_1 * x * (a_4 * x + a_3) + a_1**3 + a_3)
 
 pade_1_3_A_ccode = ccg(pade_1_3_A, 'pade_1_3',include_braces=False,verbose=False)
 pade_1_3_A_pycode = f"""

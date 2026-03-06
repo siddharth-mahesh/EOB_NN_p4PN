@@ -26,8 +26,8 @@ class RationalActivation(eqx.Module):
             degree_of_q: The degree of the denominator polynomial.
         """
         k_p, k_q = jax.random.split(key, 2)
-        self.p = jax.random.normal(k_p, (features,degree_of_p - 1)) * 0.1
-        self.q = jax.random.normal(k_q, (features,degree_of_q - 1)) * 0.1
+        self.p = jax.random.normal(k_p, (features,degree_of_p - 1)) * .1
+        self.q = jax.random.normal(k_q, (features,degree_of_q - 1)) * .1
 
     def __call__(self, x: jax.Array) -> jax.Array:
         """
@@ -39,7 +39,8 @@ class RationalActivation(eqx.Module):
         x_powers_p = jnp.power(x_expanded, jnp.arange(1, self.p.shape[-1] + 1))
         numerator = 1.0 + jnp.einsum('...fd, fd -> ...f', x_powers_p, self.p)
         x_powers_q = jnp.power(x_expanded, jnp.arange(1, self.q.shape[-1] + 1))
-        denominator = 1.0 + jnp.einsum('...fd, fd -> ...f', x_powers_q, self.q)
+        denominator = 1.0 + jnp.abs(jnp.einsum('...fd, fd -> ...f', x_powers_q, self.q))
+        # safe_denominator = jnp.where(jnp.abs(denominator) < 1e-6, 1e-6 * jnp.sign(denominator + 1e-15), denominator)
         return numerator / denominator
 
 

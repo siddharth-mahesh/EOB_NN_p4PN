@@ -81,8 +81,6 @@ typedef struct __commondata_struct__ {
   REAL *restrict dynamics_low;                // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL *restrict dynamics_raw;                // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL Delta_t;                               // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
-  REAL Delta_t_NS;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
-  REAL Delta_t_S;                             // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL Hreal;                                 // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL M_f;                                   // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL Omega_circ;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
@@ -116,6 +114,13 @@ typedef struct __commondata_struct__ {
   REAL nr_omega_1;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL nr_omega_2;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL omega_qnm;                             // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l2m1;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l2m2;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l3m2;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l3m3;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l4m3;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l4m4;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL omega_qnm_l5m5;                        // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL phi;                                   // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL pphi;                                  // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL prstar;                                // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
@@ -126,6 +131,13 @@ typedef struct __commondata_struct__ {
   REAL t_attach;                              // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL t_stepback;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL tau_qnm;                               // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l2m1;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l2m2;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l3m2;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l3m3;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l4m3;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l4m4;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
+  REAL tau_qnm_l5m5;                          // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL total_mass;                            // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   REAL xi;                                    // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
   double complex *restrict waveform_IMR;      // (nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients)
@@ -270,7 +282,6 @@ typedef struct __griddata__ {
 #define COMPLEX double complex
 #define NUMVARS 8
 #define TIME 0
-#define FREQ 0
 #define R 1
 #define PHI 2
 #define PRSTAR 3

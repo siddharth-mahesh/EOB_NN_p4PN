@@ -14,7 +14,7 @@ from EOB_NN_p4PN.EOB.pade_1_3_a import pade_1_3
 from EOB_NN_p4PN.EOB.pade_0_3_d import pade_0_3
 from EOB_NN_p4PN.EOB.eob_constants_3pn import set_eob_constants_3PN
 from EOB_NN_p4PN.EOB.strain import strain
-
+from EOB_NN_p4PN.EOB_3PN.eob3pn import EOB as EOB_3PN
 # set jax to 64 bit precision
 jax.config.update("jax_enable_x64", True)
 import diffrax
@@ -46,16 +46,17 @@ class Neural_EOB(eqx.Module):
     _pade_d: Callable
     _set_eob_constants_3PN: Callable
     _strain: Callable
-#    A_scale: float
-#    D_scale: float
-#    Q_scale: float
-#    f_scale: float
-#    delta_scale: float
+    A_scale: float
+    D_scale: float
+    Q_scale: float
+    f_scale: float
+    delta_scale: float
+    eob3pn: EOB_3PN
 
     def __init__(
         self,
         key:jax.random.PRNGKey=jax.random.PRNGKey(42),
-        srate:int=4096,
+        srate:int=2000,
         hidden_dim_A:int=2,
         hidden_dim_D:int=2,
         hidden_dim_Q:int=2,
@@ -117,14 +118,17 @@ class Neural_EOB(eqx.Module):
         self._set_eob_constants_3PN = set_eob_constants_3PN
         self._pade_a = pade_1_3
         self._pade_d = pade_0_3
-#        self.A_scale = 1.e-1
-#        self.D_scale = 1.e-1
-#        self.Q_scale = 1.e-1
-#        self.f_scale = 1.e-1
-#        self.delta_scale = 1.e-1
+        self.A_scale = 1.e-1
+        self.D_scale = 1.e-1
+        self.Q_scale = 1.e-1
+        self.f_scale = 1.e-1
+        self.delta_scale = 1.e-1
+        self.eob3pn = EOB_3PN()
     def _strain(self, strain_qts, nu, constants):
         Omega = strain_qts[2] 
-        return strain(self,strain_qts, nu, constants)*(1 + jnp.pow(Omega,7.0/3.0)*self.f_p4PN(jnp.array([Omega, nu])))*jnp.exp(I*jnp.pow(Omega,7.0/3.0)*self.delta_p4PN(jnp.array([Omega, nu])))
+        f_nn = 1 + jnp.pow(Omega,7/2) * self.f_p4PN(jnp.array([Omega, nu]))
+        delta_nn = jnp.exp(1j*jnp.pow(Omega,7/2) * self.delta_p4PN(jnp.array([Omega, nu])))
+        return strain(self,strain_qts, nu, constants) * f_nn * delta_nn
 
     def _flux(self, strain_qts, nu, constants):
         Omega = strain_qts[2]
@@ -145,7 +149,7 @@ class Neural_EOB(eqx.Module):
         u = 1 / r
         neural_in = jnp.array([u, nu])
         a = self._pade_a(u, constants["a_1"], constants["a_3"], constants["a_4"]) * (
-            1 + nu*self.A_p4PN(neural_in)
+            1 + nu*self.A_scale*self.A_p4PN(neural_in)
         )
         return a
 
@@ -162,9 +166,8 @@ class Neural_EOB(eqx.Module):
         """
         u = 1 / r
         neural_in = jnp.array([u, nu])
-        d = self._pade_d(u, constants["d_2"], constants["d_3"]) * (
-            1 + nu*self.D_p4PN(neural_in)
-        )
+        d_nn = 1 + jnp.pow(u,4) * self.D_p4PN(neural_in)
+        d = self._pade_d(u, constants["d_2"], constants["d_3"]) 
         return d
 
     def _hamiltonian(self, y, nu, constants):
@@ -185,142 +188,20 @@ class Neural_EOB(eqx.Module):
         z_3 = constants["z_3"]
         a = self._a_potential(r, nu, constants)
         d = self._d_potential(r, nu, constants)
-        q_p4pn = nu*self.Q_p4PN(neural_q_in)
-        h_real = (
-            jnp.sqrt(
-                2
-                * nu
+        q_p4pn = 1 + jnp.pow(u,4)*self.Q_scale*self.Q_p4PN(neural_q_in)
+        inner_root = (a* (
+                ((p_phi) * (p_phi)) * ((u) * (u))
+                + ((p_r) * (p_r))
                 * (
-                    jnp.sqrt(
-                        a
-                        * (
-                            ((p_phi) * (p_phi)) * ((u) * (u))
-                            + ((p_r) * (p_r))
-                            * (
-                                a / d
-                                + ((p_r) * (p_r)) * (((u) * (u)) * z_3 * (1 + q_p4pn))
-                            )
-                            + 1
-                        )
-                    )
-                    - 1
+                    a / d
+                    + ((p_r) * (p_r)) * (((u) * (u)) * z_3)*q_p4pn
                 )
                 + 1
             )
-            / nu
         )
+        outer_root = 2 * nu * (jnp.sqrt(inner_root) - 1) + 1
+        h_real = jnp.sqrt(outer_root) / nu
         return h_real
-
-    def _c_potential(self, r, p_phi, nu, constants):
-        """
-        Compute the Hamiltonian C potential.
-        The C potential is given by:
-            C = lim_{p_r -> 0} (1/p_r * dH/dp_r)
-
-        Args:
-            r (float): Radial position.
-            p_phi (float): Angular momentum.
-            nu (float): Symmetric mass ratio.
-            constants (dict): Dictionary of constants.
-
-        Returns:
-            float: Hamiltonian C potential.
-        """
-        u = 1 / (r + 1e-100)
-        a = self._a_potential(r, nu, constants)
-        d = self._d_potential(r, nu, constants)
-        tmp0 = ((p_phi) * (p_phi)) * ((u) * (u))
-        tmp2 = 2 * nu * (jnp.sqrt(a) * jnp.sqrt(tmp0 + 1) - 1)
-        c_circ = jnp.pow(a, 3.0 / 2.0) / (d * jnp.sqrt(tmp0 * tmp2 + tmp0 + tmp2 + 1))
-        return c_circ
-
-    def _j(self, r, nu, constants):
-        """
-        Compute the circular orbit angular momentum.
-
-        Args:
-            r (float): Radial position
-            constants (dict): Dictionary of constants.
-
-        Returns:
-            float: Circular orbit angular momentum
-        """
-        r3 = r * r * r
-        a = self._a_potential(r, nu, constants)
-        da_dr = jax.grad(self._a_potential, argnums=0)(r, nu, constants)
-        j = jnp.sqrt(r3 * da_dr / (2 * a - r * da_dr))
-        return j
-
-    def _h_circ(self, r, nu, constants):
-        """
-        Compute the circular orbit Hamiltonian.
-
-        Args:
-            r (float): Radial position
-            nu (float): Symmetric mass ratio
-            constants (dict): Dictionary of constants
-
-        Returns:
-            float: Circular orbit Hamiltonian
-        """
-        j = self._j(r, nu, constants)
-        z_circ = jnp.array([r, 0.0, 0.0, j])
-        h_circ = self._hamiltonian(z_circ, nu, constants)
-        return h_circ
-
-    def _pr_adiabatic(self, r, nu, omega_0, constants):
-        """
-        Compute the radial momentum in the adiabatic limit.
-
-        Args:
-            r (float): Radial position
-            constants (dict): Dictionary of constants.
-
-        Returns:
-            float: Radial momentum
-        """
-        j, dj_dr = jax.value_and_grad(self._j, argnums=0)(r, nu, constants)
-        c = self._c_potential(r, j, nu, constants)
-        y = jnp.array([r, 0.0, 0.0, j])
-        h = nu * self._hamiltonian(y, nu, constants)
-        strain_qts = jnp.array([0.,h,omega_0]) 
-        flux = self._flux(strain_qts, nu, constants)
-        pr = flux / (c * dj_dr)
-        return pr
-
-    def _circular_orbit_condition(self, r, params):
-        """
-        Solve for the circular orbit condition for given nu and omega_0.
-
-        Args:
-            r (float): Radial position
-            params (tuple): Parameters given by (nu, omega_0, constants)
-
-        Returns:
-            float: Circular orbit condition
-        """
-        nu, omega_0, constants = params
-        j = self._j(r, nu, constants)
-        y = jnp.array([r, 0.0, 0.0, j])
-        d_h_real = jax.grad(self._hamiltonian, argnums=0)(y, nu, constants)
-        phidot = d_h_real[3]  # omega = d_h_real/d_p_phi
-        return phidot - omega_0
-
-    def _isco_condition(self, r, params):
-        """
-        Solve for the ISCO condition for given nu and constants.
-
-        Args:
-            r (float): Radial position
-            params (tuple): Parameters given by (nu, constants)
-
-        Returns:
-            float: ISCO condition
-        """
-        nu, constants = params
-        dhdr = lambda r: jax.grad(self._h_circ)(r, nu, constants)
-        d2h_dr2 = jax.grad(dhdr)(r)
-        return d2h_dr2
     
     def _lr_condition(self,r,params):
         """
@@ -334,32 +215,12 @@ class Neural_EOB(eqx.Module):
             float: LR condition
         """
         nu, constants = params
+        #r_safe = jnp.maximum(r, 1.)
+        r_safe = r
         # invert the sign on the photon effective potential to avoid any stable photon orbits
-        photon_eff = lambda r: -self._a_potential(r, nu, constants) / r**2
-        lr_condition = jax.grad(photon_eff)(r)
+        photon_eff = lambda r_val: -self._a_potential(r_val, nu, constants) / r_val**2
+        lr_condition = jax.grad(photon_eff)(r_safe)
         return lr_condition
-
-    def _initial_conditions(self, x):
-        """
-        Find the initial conditions for the EOB Equations of motion.
-
-        Args:
-            x (jnp.ndarray): input data [nu, omega_0]
-
-        Returns:
-            jnp.ndarray: Initial conditions [r, phi, p_r, p_phi]
-        """
-        nu, omega_0 = x
-        constants = self._set_eob_constants_3PN(nu)
-        r0 = optimistix.root_find(
-            self._circular_orbit_condition,
-            optimistix.Newton(1e-8, 1e-8),
-            omega_0 ** (-2 / 3),
-            (nu, omega_0, constants),
-        ).value
-        pr0 = self._pr_adiabatic(r0, nu, omega_0, constants)
-        pphi0 = self._j(r0, nu, constants)
-        return jnp.array([r0, 0.0, pr0, pphi0])
 
     def _eom(self, t, y, args):
         """
@@ -387,6 +248,23 @@ class Neural_EOB(eqx.Module):
         flux = self._flux(strain_qts, nu, constants)
         ydot = symplectic_map @ d_h_real + jnp.array([0.0, 0.0, 0.0, flux])
         return ydot
+
+    def _j(self, r, nu, constants):
+        """
+        Compute the circular orbit angular momentum.
+
+        Args:
+            r (float): Radial position
+            constants (dict): Dictionary of constants.
+
+        Returns:
+            float: Circular orbit angular momentum
+        """
+        r3 = r * r * r
+        a = self._a_potential(r, nu, constants)
+        da_dr = jax.grad(self._a_potential, argnums=0)(r, nu, constants)
+        j = jnp.sqrt(r3 * da_dr / (2 * a - r * da_dr))
+        return j
 
     def _event_fn(self, t, y, args, **kwargs):
         """
@@ -417,61 +295,30 @@ class Neural_EOB(eqx.Module):
         Returns:
             jnp.ndarray: Trajectory of the system
         """
-        r_LR = optimistix.root_find(
+        r_LR = jax.lax.stop_gradient(optimistix.root_find(
             self._lr_condition, optimistix.Newton(1e-8, 1e-8), 3.0, (nu, constants)
-        ).value
+        ).value)
         params = (nu, r_LR, constants)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self._eom),
-            diffrax.Dopri5(),
+            diffrax.Euler(),
             t0=0,
-            t1=jnp.inf,
+            t1=5000.0,
             dt0=dt,
             y0=y0,
             args=params,
-            stepsize_controller=diffrax.PIDController(rtol=1e-8, atol=1e-8),
             event=diffrax.Event(
-                self._event_fn, optimistix.Newton(1e-5, 1e-5, optimistix.rms_norm)
+                self._event_fn, optimistix.Newton(1e-4, 1e-4, optimistix.rms_norm)
             ),
             saveat=diffrax.SaveAt(t0=True, t1=True, dense=True),
+            max_steps=100000,
             throw=False,
         )
-        times = jnp.linspace(0, sol.ts[-1], self.srate)
+        # restrict to 2000M before merger
+        t_fin = jax.lax.stop_gradient(sol.ts[-1])
+        times = jnp.linspace(0, t_fin - .1, self.srate)
         trajectory = jax.vmap(sol.evaluate, in_axes=0)(times)
         return times, trajectory
-    
-    def _dynamics_training(self, y0, nu, constants, dt=0.1):
-        """
-        Evolve the EOB dynamics for training.
-        This differs from _dynamics in that:
-        1. It does not use a root finder for final conditions, opts for fiducial t_fin = 2000M
-
-        Args:
-            y0 (jnp.ndarray): Initial conditions [r, phi, p_r, p_phi]
-            nu (jnp.ndarray): Symmetric mass ratio
-            constants (dict): Dictionary of constants
-            dt (float): Output time step
-
-        Returns:
-            jnp.ndarray: Trajectory of the system
-        """
-        params = (nu, 3., constants)
-        sol = diffrax.diffeqsolve(
-            diffrax.ODETerm(self._eom),
-            diffrax.Dopri5(),
-            t0=0,
-            t1=2000,
-            dt0=dt,
-            y0=y0,
-            args=params,
-            stepsize_controller=diffrax.PIDController(rtol=1e-8, atol=1e-8),
-            saveat=diffrax.SaveAt(t0=True, t1=True, dense=True),
-            throw=False,
-        )
-        times = jnp.linspace(0, sol.ts[-1], self.srate)
-        trajectory = jax.vmap(sol.evaluate, in_axes=0)(times)
-        return times, trajectory
-
 
     def _strain_from_dynamics(self, trajectory, nu, constants):
         """
@@ -494,45 +341,27 @@ class Neural_EOB(eqx.Module):
         return jax.vmap(self._strain, in_axes=(0, None, None))(
             strain_qts, nu, constants
         )
-
-    def _single_pass(self, x):
-        """
-        Compute the GW strain given the parameters
-
-        Args:
-            x (jnp.ndarray): parameters [nu, omega_0]
-
-        Returns:
-            times (jnp.ndarray): times
-            strain (complex): Complex GW strain.
-        """
-        nu = x[0]
-        constants = self._set_eob_constants_3PN(nu)
-        ics = self._initial_conditions(x)
-        times, trajectory = self._dynamics(ics, nu, constants)
-        times_stack = jnp.reshape(times, (times.shape[0], 1))
-        strain = self._strain_from_dynamics(trajectory, nu, constants)
-        strain_stack = jnp.reshape(strain, (strain.shape[0], 1))
-        return jnp.hstack((times_stack, strain_stack), dtype=jnp.complex128)
     
     def _single_pass_training(self,x):
         """
         Compute the GW strain given the parameters.
         This differs from _single_pass in that:
-        1. It does not use a root finder for initial conditions, opts for fiducial r = 30M 
+        1. It uses a pure 3PN rootfinder for initial conditions, so r0 aligns with omega_0.
         2. It does not use a root finder for final conditions, opts for fiducial t_fin = 2000M
         3. It uses the adjoint method for dynamics.
 
         Args:
-        """
+        """        
         nu = x[0]
         constants = self._set_eob_constants_3PN(nu)
-        r0 = 30.
-        phi0 = 0.
-        pr0 = 0.
-        pphi0 = jnp.sqrt(r0)
-        ics = jnp.array([r0, phi0, pr0, pphi0])
-        times, trajectory = self._dynamics_training(ics, nu, constants)
+        ics_0 = self.eob3pn._initial_conditions(x)
+        times_3pn, trajectory_3pn = self.eob3pn._dynamics(ics_0, nu, constants)
+        t_fin_3pn = times_3pn[-1]
+        t_start_nn = jnp.maximum(0.0, t_fin_3pn - 1000.0)
+        ics_1000M = jnp.vstack([jnp.interp(t_start_nn, times_3pn, trajectory_3pn[:, i]) for i in range(4)]).flatten()
+        ics = jnp.where(t_fin_3pn < 1000.0, ics_0, ics_1000M)
+        ics = jax.lax.stop_gradient(ics)
+        times, trajectory = self._dynamics(ics, nu, constants)
         times_stack = jnp.reshape(times, (times.shape[0], 1))
         strain = self._strain_from_dynamics(trajectory, nu, constants)
         strain_stack = jnp.reshape(strain, (strain.shape[0], 1))
@@ -548,57 +377,59 @@ class Neural_EOB(eqx.Module):
         a = jax.vmap(self._a_potential, in_axes=(0, None, None))(r_grid,nu,constants)
         return a*(1 + j_grid/r_grid**2)
 
-    def __call__(self, x, training=False):
+    def __call__(self, x):
         """
         Compute the GW strain for a given batch of parameters
 
         Args:
-            x (jnp.ndarray): batch of parameters of the form [nu, omega_0]
+            x (jnp.ndarray): batch of parameters of the form [nu]
 
         Returns:
             times (jnp.ndarray): times
             strain (complex): Complex GW strain.
         """
-        if training:
-            return jax.vmap(self._single_pass_training, in_axes=(0))(x)
-        return jax.vmap(self._single_pass, in_axes=(0))(x)
-
+        return jax.vmap(self._single_pass_training, in_axes=(0))(x)
 
 if __name__ == "__main__":
     from EOB_NN_p4PN.EOB_3PN.eob3pn import EOB
     eobnn = Neural_EOB(key=jax.random.PRNGKey(0),srate=4096)
     eob3pn = EOB()
-    key = jax.random.PRNGKey(42)
+    key = jax.random.PRNGKey(12)
     x_sxs = jnp.load("x_sxs_1em4.npy") 
     y_sxs = jnp.load("y_sxs_1em4.npy")
     strain_series = eobnn(x_sxs)
     print(f"strain_series.shape: {strain_series.shape}")
     strain_series_3pn = eob3pn(x_sxs)
     idx = jax.random.randint(key, 1, 0, x_sxs.shape[0] - 1)[0]
-    times = strain_series[idx, :, 0]
-    strain = strain_series[idx, :, 1]
-    times_3pn = strain_series_3pn[idx, :, 0]
-    strain_3pn = strain_series_3pn[idx, :, 1]
-    times_sxs = y_sxs[idx, :, 0]
-    strain_sxs = y_sxs[idx, :, 1]
-
-    strain *= jnp.exp(-1j*jnp.unwrap(jnp.angle(strain))[0])
-    strain_3pn *= jnp.exp(-1j*jnp.unwrap(jnp.angle(strain_3pn))[0])
+    times_3pn = strain_series_3pn[idx, :, 0] - strain_series_3pn[idx, -1, 0]
+    strain_3pn_unprocessed = strain_series_3pn[idx, :, 1]
+    times_sxs = y_sxs[idx, :, 0] - y_sxs[idx, -1, 0]
+    strain_sxs_unprocessed = y_sxs[idx, :, 1]
+    times = strain_series[idx, :, 0] - strain_series[idx, -1, 0]
+    strain_unprocessed = strain_series[idx, :, 1]
+    
+    # zero phase at merger
+    strain = strain_unprocessed*jnp.exp(-1j*jnp.angle(strain_unprocessed)[-1])
+    print(jnp.unwrap(jnp.angle(strain))[-1])
+    strain_3pn = strain_3pn_unprocessed*jnp.exp(-1j*jnp.angle(strain_3pn_unprocessed)[-1])
+    print(jnp.unwrap(jnp.angle(strain_3pn))[-1])
+    strain_sxs = strain_sxs_unprocessed*jnp.exp(-1j*jnp.angle(strain_sxs_unprocessed)[-1])
+    print(jnp.unwrap(jnp.angle(strain_sxs))[-1])
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(2, 1, sharex=True, figsize=(8, 10))
     fig.subplots_adjust(hspace=0)
-    ax[0].plot(jnp.abs(times), jnp.abs(strain), label="Neural")
-    ax[0].plot(jnp.abs(times_3pn), jnp.abs(strain_3pn), label="3PN", linestyle="dashed")
-    ax[0].plot(jnp.abs(times_sxs), jnp.abs(strain_sxs), label="SXS", linestyle="dotted")
-    ax[1].plot(jnp.abs(times), jnp.unwrap(jnp.angle(strain)), label="Neural")
+    ax[0].plot(jnp.real(times), jnp.abs(strain), label="Neural")
+    ax[0].plot(jnp.real(times_3pn), jnp.abs(strain_3pn), label="3PN", linestyle="dashed")
+    ax[0].plot(jnp.real(times_sxs), jnp.abs(strain_sxs), label="SXS", linestyle="dotted")
+    ax[1].plot(jnp.real(times), jnp.unwrap(jnp.angle(strain)) - jnp.unwrap(jnp.angle(strain))[-1], label="Neural")
     ax[1].plot(
-        jnp.abs(times_3pn),
-        jnp.unwrap(jnp.angle(strain_3pn)),
+        jnp.real(times_3pn),
+        jnp.unwrap(jnp.angle(strain_3pn)) - jnp.unwrap(jnp.angle(strain_3pn))[-1],
         label="3PN",
         linestyle="dashed",
     )
-    ax[1].plot(jnp.abs(times_sxs), jnp.unwrap(jnp.angle(strain_sxs)), label="SXS", linestyle="dotted")
+    ax[1].plot(jnp.real(times_sxs), jnp.unwrap(jnp.angle(strain_sxs)) - jnp.unwrap(jnp.angle(strain_sxs))[-1], label="SXS", linestyle="dotted")
     ax[0].set_ylabel(r"$A$")
     ax[1].set_xlabel("Time")
     ax[1].set_ylabel(r"$\phi$")
@@ -606,13 +437,13 @@ if __name__ == "__main__":
     plt.savefig("eob_nnp4pn.png")
 
     from jax.scipy.integrate import trapezoid
-    t_eval = jnp.linspace(0,500,1024)
-    dEdt_sxs = jnp.interp(t_eval,jnp.abs(times_sxs),jnp.abs(jnp.gradient(strain_sxs, jnp.abs(times_sxs)))**2)
-    dEdt_nn = jnp.interp(t_eval,jnp.abs(times),jnp.abs(jnp.gradient(strain, jnp.abs(times)))**2)
-    dEdt_3pn = jnp.interp(t_eval,jnp.abs(times_3pn),jnp.abs(jnp.gradient(strain_3pn, jnp.abs(times_3pn)))**2)
-    phi_model = jnp.interp(t_eval,jnp.abs(times),jnp.unwrap(jnp.angle(strain)))
-    phi_sxs = jnp.interp(t_eval,jnp.abs(times_sxs),jnp.unwrap(jnp.angle(strain_sxs)))
-    phi_3pn = jnp.interp(t_eval,jnp.abs(times_3pn),jnp.unwrap(jnp.angle(strain_3pn)))
+    t_eval = jnp.linspace(-500,0,1024)
+    dEdt_sxs = jnp.interp(t_eval,jnp.real(times_sxs),jnp.abs(jnp.gradient(strain_sxs, jnp.real(times_sxs)))**2)
+    dEdt_nn = jnp.interp(t_eval,jnp.real(times),jnp.abs(jnp.gradient(strain, jnp.real(times)))**2)
+    dEdt_3pn = jnp.interp(t_eval,jnp.real(times_3pn),jnp.abs(jnp.gradient(strain_3pn, jnp.real(times_3pn)))**2)
+    phi_model = jnp.interp(t_eval,jnp.real(times),jnp.unwrap(jnp.angle(strain)) - jnp.unwrap(jnp.angle(strain))[-1])
+    phi_sxs = jnp.interp(t_eval,jnp.real(times_sxs),jnp.unwrap(jnp.angle(strain_sxs)) - jnp.unwrap(jnp.angle(strain_sxs))[-1])
+    phi_3pn = jnp.interp(t_eval,jnp.real(times_3pn),jnp.unwrap(jnp.angle(strain_3pn)) - jnp.unwrap(jnp.angle(strain_3pn))[-1])
     delta_phi_model_sxs = phi_model - phi_sxs
     delta_phi_model_3pn = phi_3pn - phi_model
     delta_phi_3pn_sxs = phi_3pn - phi_sxs
@@ -623,7 +454,7 @@ if __name__ == "__main__":
     Delta_E_GW_model_3pn = trapezoid((dEdt_nn-dEdt_3pn)**2,t_eval)
     Delta_E_GW_3pn_sxs = trapezoid((dEdt_3pn-dEdt_sxs)**2,t_eval)
     print(f"""
-For the first 500M of the waveform, 
+For the last 500M of the waveform, 
 the excess radiated energy is:
 Neural-SXS: {Delta_E_GW_model_sxs:.2e}
 Neural-3PN: {Delta_E_GW_model_3pn:.2e}

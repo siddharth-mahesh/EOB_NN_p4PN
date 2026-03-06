@@ -2,9 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np  
 from scipy.interpolate import CubicSpline
 from scipy.optimize import root_scalar
-#import jax
-#import jax.numpy as np
-#jax.config.update('jax_enable_x64', True)
 import json
 import sxs
 import os
@@ -110,12 +107,14 @@ class SXSLoader:
             w_sliced = w[reference_index:]
             h22 = w_sliced[:, w_sliced.index(2, 2)]
             tmax = self.find_interpolated_maximum(h22.data,h22.t)
-            new_times = np.linspace(h22.t[0], tmax, self.srate)
+            new_times = np.linspace(max(h22.t[0],tmax-2000), tmax, self.srate)
             h22 = h22.interpolate(new_times)
+            # phase shift so merger phase is zero
+            phi_22 = np.unwrap(np.angle(h22.data))[-1]
             y.append(
                 np.hstack([
-                    np.array(h22.t - h22.t[0],dtype=np.complex128).reshape(-1, 1),
-                    np.array(h22.data,dtype=np.complex128).reshape(-1, 1)
+                    np.array(h22.t - tmax,dtype=np.complex128).reshape(-1, 1),
+                    np.array(h22.data*np.exp(-1j*phi_22),dtype=np.complex128).reshape(-1, 1)
                 ])
             )
         return np.array(x), np.array(y)
@@ -145,12 +144,12 @@ if __name__ == "__main__":
     print("y train shape:", y.shape)
     h22 = y[0]
     fig, ax = plt.subplots(2, 1, sharex=True)
-    ax[0].plot(np.abs(h22[:, 0]), np.abs(h22[:, 1]))
+    ax[0].plot(np.real(h22[:, 0]), np.abs(h22[:, 1]))
     ax[0].set_title(rf"Extrapolated waveform, $\nu = {x[0][0]:.2e}$, $\Omega_0 = {x[0][1]:.2e}$")
     ax[0].set_xlabel(r"$(t_{\mathrm{corr}} - r_\ast)/M$")
     ax[0].set_yscale('log')
     ax[0].grid(True)
-    ax[1].plot(np.abs(h22[:, 0]), np.unwrap(np.angle(h22[:, 1])))
+    ax[1].plot(np.real(h22[:, 0]), np.unwrap(np.angle(h22[:, 1])))
     ax[1].set_xlabel(r"$(t_{\mathrm{corr}} - r_\ast)/M$")
     ax[1].grid(True)
     plt.tight_layout()

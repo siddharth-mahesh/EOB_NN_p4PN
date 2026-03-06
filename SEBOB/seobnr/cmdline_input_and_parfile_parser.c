@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define NUM_PARAMETERS 8 // Define the number of parameters
+#define NUM_PARAMETERS 6 // Define the number of parameters
 
 #define LINE_SIZE 1024 // Define the max size of a line
 #define PARAM_SIZE 128 // Define the max param string size
@@ -76,17 +76,17 @@ static void safe_copy(char *dest, const char *src, size_t size) {
  * Prints usage instructions for the program.
  *
  * This function outputs the different usage options available for running the
- * seobnrv5_aligned_spin_inspiral executable. It guides users on how to provide parameter
+ * seobnrv5_nrpy executable. It guides users on how to provide parameter
  * files and overwrite steerable parameters through command-line arguments.
  */
 static void print_usage() {
-  fprintf(stderr, "Usage option 0: ./seobnrv5_aligned_spin_inspiral [--help or -h] - Outputs this usage command\n");
-  fprintf(stderr, "Usage option 1: ./seobnrv5_aligned_spin_inspiral - Reads in parameter file seobnrv5_aligned_spin_inspiral.par\n");
-  fprintf(stderr, "Usage option 2: ./seobnrv5_aligned_spin_inspiral [parfile] - Reads in parameter file [parfile]\n");
-  fprintf(stderr, "Usage option 3: ./seobnrv5_aligned_spin_inspiral [mass_ratio chi1 chi2 initial_omega total_mass dt] - Overwrites parameters in "
-                  "list after reading in seobnrv5_aligned_spin_inspiral.par\n");
-  fprintf(stderr, "Usage option 4: ./seobnrv5_aligned_spin_inspiral [parfile] [mass_ratio chi1 chi2 initial_omega total_mass dt] - Overwrites list "
-                  "of steerable parameters after reading in [parfile]\n");
+  fprintf(stderr, "Usage option 0: ./seobnrv5_nrpy [--help or -h] - Outputs this usage command\n");
+  fprintf(stderr, "Usage option 1: ./seobnrv5_nrpy - Reads in parameter file seobnrv5_nrpy.par\n");
+  fprintf(stderr, "Usage option 2: ./seobnrv5_nrpy [parfile] - Reads in parameter file [parfile]\n");
+  fprintf(stderr, "Usage option 3: ./seobnrv5_nrpy [mass_ratio chi1 chi2 initial_omega total_mass dt] - Overwrites parameters in list after reading "
+                  "in seobnrv5_nrpy.par\n");
+  fprintf(stderr, "Usage option 4: ./seobnrv5_nrpy [parfile] [mass_ratio chi1 chi2 initial_omega total_mass dt] - Overwrites list of steerable "
+                  "parameters after reading in [parfile]\n");
 }
 
 #define MAX_ARRAY_SIZE 100 // Adjust as needed
@@ -104,9 +104,8 @@ typedef struct {
 } param_descriptor;
 
 // param_table[] is a list of parameter descriptors, each containing the parameter's name, unique index, type, array size, and buffer size.
-param_descriptor param_table[] = {{"Delta_t_NS", 0, PARAM_REAL, 0, 0}, {"a6", 1, PARAM_REAL, 0, 0},        {"chi1", 2, PARAM_REAL, 0, 0},
-                                  {"chi2", 3, PARAM_REAL, 0, 0},       {"dt", 4, PARAM_REAL, 0, 0},        {"initial_omega", 5, PARAM_REAL, 0, 0},
-                                  {"mass_ratio", 6, PARAM_REAL, 0, 0}, {"total_mass", 7, PARAM_REAL, 0, 0}};
+param_descriptor param_table[] = {{"chi1", 0, PARAM_REAL, 0, 0},          {"chi2", 1, PARAM_REAL, 0, 0},       {"dt", 2, PARAM_REAL, 0, 0},
+                                  {"initial_omega", 3, PARAM_REAL, 0, 0}, {"mass_ratio", 4, PARAM_REAL, 0, 0}, {"total_mass", 5, PARAM_REAL, 0, 0}};
 #define NUM_PARAMS (int)(sizeof(param_table) / sizeof(param_descriptor))
 
 /**
@@ -248,7 +247,7 @@ void cmdline_input_and_parfile_parser(commondata_struct *restrict commondata, in
 
   // Determine the usage option based on argc
   if (argc == 1) {
-    option = 1; // Usage option 1: Process default parameter file "seobnrv5_aligned_spin_inspiral.par"
+    option = 1; // Usage option 1: Process default parameter file "seobnrv5_nrpy.par"
   } else if (argc == 2) {
     // Check if the argument is a file
     FILE *file_check = fopen(argv[1], "r");
@@ -263,7 +262,7 @@ void cmdline_input_and_parfile_parser(commondata_struct *restrict commondata, in
       exit(1);
     }
   } else if (argc == 1 + number_of_steerable_parameters) {
-    option = 3; // Usage option 3: Overwrite steerable parameters after processing "seobnrv5_aligned_spin_inspiral.par"
+    option = 3; // Usage option 3: Overwrite steerable parameters after processing "seobnrv5_nrpy.par"
   } else if (argc == 2 + number_of_steerable_parameters) {
     // Check if the first argument is a file
     FILE *file_check = fopen(argv[1], "r");
@@ -284,7 +283,7 @@ void cmdline_input_and_parfile_parser(commondata_struct *restrict commondata, in
   // fprintf(stderr, "Using option %d\n", option);
 
   // Determine the filename based on the selected option.
-  const char *filename = (option == 1 || option == 3) ? "seobnrv5_aligned_spin_inspiral.par" : argv[1];
+  const char *filename = (option == 1 || option == 3) ? "seobnrv5_nrpy.par" : argv[1];
   FILE *file = fopen(filename, "r");
   if (file == NULL) {
     print_usage();
@@ -369,20 +368,16 @@ void cmdline_input_and_parfile_parser(commondata_struct *restrict commondata, in
         // Assign the parsed values to the corresponding fields in commondata.
 
         if (param_desc->index == 0) {
-          read_REAL(values_array[0], &commondata->Delta_t_NS, "Delta_t_NS");
-        } else if (param_desc->index == 1) {
-          read_REAL(values_array[0], &commondata->a6, "a6");
-        } else if (param_desc->index == 2) {
           read_REAL(values_array[0], &commondata->chi1, "chi1");
-        } else if (param_desc->index == 3) {
+        } else if (param_desc->index == 1) {
           read_REAL(values_array[0], &commondata->chi2, "chi2");
-        } else if (param_desc->index == 4) {
+        } else if (param_desc->index == 2) {
           read_REAL(values_array[0], &commondata->dt, "dt");
-        } else if (param_desc->index == 5) {
+        } else if (param_desc->index == 3) {
           read_REAL(values_array[0], &commondata->initial_omega, "initial_omega");
-        } else if (param_desc->index == 6) {
+        } else if (param_desc->index == 4) {
           read_REAL(values_array[0], &commondata->mass_ratio, "mass_ratio");
-        } else if (param_desc->index == 7) {
+        } else if (param_desc->index == 5) {
           read_REAL(values_array[0], &commondata->total_mass, "total_mass");
         } else {
           fprintf(stderr, "Error: Unknown parameter index for %s.\n", param_name);

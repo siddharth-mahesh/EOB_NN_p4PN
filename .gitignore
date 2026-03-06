@@ -1,3 +1,7 @@
+#Debugging and writeup scripts
+debug_scripts/
+writeups/
+
 # HPC job logs
 logs/
 *.sh

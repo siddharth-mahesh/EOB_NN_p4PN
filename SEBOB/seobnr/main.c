@@ -49,6 +49,5 @@ int main(int argc, const char *argv[]) {
   free(commondata.waveform_fine);
   free(commondata.waveform_inspiral);
   free(commondata.waveform_IMR);
-
   return 0;
 } // END FUNCTION main

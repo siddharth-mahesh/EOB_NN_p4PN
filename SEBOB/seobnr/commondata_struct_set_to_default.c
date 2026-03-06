@@ -6,8 +6,6 @@
 void commondata_struct_set_to_default(commondata_struct *restrict commondata) {
   // Set commondata_struct variables to default
   commondata->Delta_t = 0.0;               // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t
-  commondata->Delta_t_NS = 0.0;            // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_NS
-  commondata->Delta_t_S = 0.0;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::Delta_t_S
   commondata->M_f = 0.0;                   // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::M_f
   commondata->NUMGRIDS = 1;                // nrpy.grid::NUMGRIDS
   commondata->a6 = 0.0;                    // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::a6
@@ -32,6 +30,13 @@ void commondata_struct_set_to_default(commondata_struct *restrict commondata) {
   commondata->nr_omega_1 = 0.0;            // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::nr_omega_1
   commondata->nr_omega_2 = 0.0;            // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::nr_omega_2
   commondata->omega_qnm = 0.0;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm
+  commondata->omega_qnm_l2m1 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m1
+  commondata->omega_qnm_l2m2 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l2m2
+  commondata->omega_qnm_l3m2 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m2
+  commondata->omega_qnm_l3m3 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l3m3
+  commondata->omega_qnm_l4m3 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m3
+  commondata->omega_qnm_l4m4 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l4m4
+  commondata->omega_qnm_l5m5 = 0.0;        // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::omega_qnm_l5m5
   commondata->phi = 0;                     // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::phi
   commondata->pphi = 3.3;                  // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::pphi
   commondata->prstar = 0.0;                // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::prstar
@@ -42,5 +47,12 @@ void commondata_struct_set_to_default(commondata_struct *restrict commondata) {
   commondata->t_attach = 0.0;              // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_attach
   commondata->t_stepback = 250.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::t_stepback
   commondata->tau_qnm = 0.0;               // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm
+  commondata->tau_qnm_l2m1 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m1
+  commondata->tau_qnm_l2m2 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l2m2
+  commondata->tau_qnm_l3m2 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m2
+  commondata->tau_qnm_l3m3 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l3m3
+  commondata->tau_qnm_l4m3 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m3
+  commondata->tau_qnm_l4m4 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l4m4
+  commondata->tau_qnm_l5m5 = 0.0;          // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::tau_qnm_l5m5
   commondata->total_mass = 50;             // nrpy.infrastructures.BHaH.seobnr.SEOBNRv5_aligned_spin_coefficients::total_mass
 } // END FUNCTION commondata_struct_set_to_default

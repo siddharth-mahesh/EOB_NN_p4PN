@@ -119,7 +119,7 @@ def read_commondata_from_binary(filename):
 if __name__ == "__main__":
     import sys,os
     repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_file = os.path.join(repo_path, "SEBOB", "seob", "commondata.bin")
+    data_file = os.path.join(repo_path, "SEBOB", "seobnr", "commondata.bin")
     if not os.path.exists(data_file):
         print(f"Error: {data_file} not found")
         sys.exit(1)
