@@ -21,7 +21,7 @@ import diffrax
 import optimistix
 import equinox as eqx
 
-from EOB_NN_p4PN.mlp import MLP
+#from EOB_NN_p4PN.mlp import MLP
 from EOB_NN_p4PN.rational_net import RationalNet
 from typing import Callable
 
@@ -125,8 +125,8 @@ class Neural_EOB(eqx.Module):
 
     def _strain(self, strain_qts, nu, constants):
         Omega = strain_qts[2] 
-        f_nn = 1 + jnp.pow(Omega,7/2) * self.f_p4PN(jnp.array([Omega, nu]))
-        delta_nn = jnp.exp(1j*jnp.pow(Omega,7/2) * self.delta_p4PN(jnp.array([Omega, nu])))
+        f_nn = 1 + jnp.pow(Omega,7/2) * self.f_scale*self.f_p4PN(jnp.array([Omega, nu]))
+        delta_nn = jnp.exp(1j*jnp.pow(Omega,7/2) * self.delta_scale*self.delta_p4PN(jnp.array([Omega, nu])))
         return strain(self,strain_qts, nu, constants) * f_nn * delta_nn
 
     def _flux(self, strain_qts, nu, constants):
@@ -165,7 +165,7 @@ class Neural_EOB(eqx.Module):
         """
         u = 1 / r
         neural_in = jnp.array([u, nu])
-        d_nn = 1 + nu * jnp.pow(u,4)*self.D_p4PN(neural_in)
+        d_nn = 1 + nu * jnp.pow(u,4)*self.D_scale*self.D_p4PN(neural_in)
         d = self._pade_d(u, constants["d_2"], constants["d_3"])*d_nn 
         return d
 
