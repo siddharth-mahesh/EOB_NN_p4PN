@@ -1312,6 +1312,8 @@ def train_hybrid_eob_dhnn_model_prelim(
         batch_indices = perm[:used_train_samples].reshape((num_train_batches, effective_batch_size))
 
         if (not geom_unlocked) and (epoch >= vf_only_min_epochs):
+            if (epoch >= vf_only_max_epochs):
+                save_model_weights(model, save_weights_path)
             if (float(last_val_l_vf) <= vf_only_target_vf) or (epoch >= vf_only_max_epochs):
                 geom_unlocked = True
                 geom_unlock_epoch = epoch
