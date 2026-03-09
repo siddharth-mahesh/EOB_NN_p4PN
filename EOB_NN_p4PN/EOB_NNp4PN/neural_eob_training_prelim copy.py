@@ -1,3 +1,10 @@
+"""
+Preliminary training script (copy) for the Neural EOB model.
+
+Contains loss definitions, including single-strain mismatch metrics, and a 
+training loop with warmup cosine decay scheduling for the Neural EOB system.
+"""
+
 from typing import Dict, Tuple, Union
 
 import equinox as eqx

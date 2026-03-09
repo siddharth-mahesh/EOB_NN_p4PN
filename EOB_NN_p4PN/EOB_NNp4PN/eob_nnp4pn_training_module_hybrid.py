@@ -1,4 +1,11 @@
-"""Hybrid DHNN: EOB dynamics structure with fully learned A/D/Q/f potentials."""
+"""
+Hybrid Dissipative Hamiltonian Neural Network (DHNN).
+
+This module implements a hybrid EOB dynamics structure where the overall physics flow
+(conservative and dissipative equations of motion) is preserved, but the core 
+potentials (A, D, Q, f) are fully learned using neural networks instead of 
+PN-factorized baseline models.
+"""
 
 from typing import Callable
 

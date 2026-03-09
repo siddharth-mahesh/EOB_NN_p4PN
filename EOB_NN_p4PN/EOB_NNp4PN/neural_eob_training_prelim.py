@@ -49,10 +49,21 @@ def vector_field_loss(model, x, y, weights=None):
 
     This helper is kept as a minimal reference loss and for quick debugging.
     The main training path below uses standardized losses.
+    
+    Args:
+        model (eqx.Module): The neural network model predicting RHS.
+        x (jnp.ndarray): Input batch of shape `(N, 5)`, typically `[nu, r, phi, p_rstar, p_phi]`.
+        y (jnp.ndarray): Target batch of shape `(N, 4)` for RHS `[dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt]`.
+        weights (jnp.ndarray, optional): Per-sample or per-component weighting.
+        
+    Returns:
+        jnp.ndarray: Mean squared error over the batch and components.
     """
     y_pred = model(x)
+    # Calculate straightforward squared error between predictions and targets
     squared_error = jnp.abs(y_pred - y)**2
     if weights is not None:
+        # Apply weighting if provided (expected to be broadcastable to the shape of squared_error)
         squared_error = squared_error * weights
     return jnp.mean(squared_error)
 
@@ -61,9 +72,19 @@ def single_case_PN_rescaled_vector_field_loss(x, y, y_nn):
 
     Error is divided by `u^8` (`u = 1/r`) to upweight weak-field mismatch where
     high-PN effects are relatively suppressed.
+    
+    Args:
+        x (jnp.ndarray): A single input sample of shape `(5,)`.
+        y (jnp.ndarray): The target RHS for the single sample of shape `(4,)`.
+        y_nn (jnp.ndarray): The predicted RHS for the single sample of shape `(4,)`.
+        
+    Returns:
+        jnp.ndarray: The PN-rescaled component-wise squared error of shape `(4,)`.
     """
+    # Guard against division by zero by setting a minimum radius
     r_safe = jnp.maximum(jnp.abs(x[1]), 1e-12)
     u = 1.0 / r_safe
+    # Rescale the squared error inversely by u^8 to heavily penalize errors at large separations (weak field)
     # Keep the component dimension (shape: (4,)) so it can broadcast with weights (shape: (4,))
     squared_error = jnp.abs(y_nn - y)**2 / (u**8)
     return squared_error
@@ -74,36 +95,75 @@ def PN_rescaled_vector_field_loss(model, x, y, weights=None):
 
     If any model output is non-finite, returns a large fallback value to prevent
     invalid gradients from corrupting optimizer state.
+    
+    Args:
+        model (eqx.Module): The neural network model predicting RHS.
+        x (jnp.ndarray): Input batch of shape `(N, 5)`.
+        y (jnp.ndarray): Target batch of shape `(N, 4)`.
+        weights (jnp.ndarray, optional): Weights to apply to the squared error.
+
+    Returns:
+        jnp.ndarray: The mean standardized vector-field loss, or 1e6 if invalid predictions exist.
     """
     y_pred = model(x)
     finite = jnp.all(jnp.isfinite(y_pred))
 
     def finite_loss(y_pred_local):
+        # Calculate loss pointwise with `vmap` to respect single-sample definition
         squared_error = jax.vmap(single_case_PN_rescaled_vector_field_loss, in_axes=(0, 0, 0))(x, y, y_pred_local)
         if weights is not None:
             squared_error = squared_error * weights
         return jnp.mean(squared_error)
 
     def fallback_loss(_):
+        # Return an arbitrarily large loss if NaNs/infs are present
         return jnp.array(1e6, dtype=x.dtype)
 
     return jax.lax.cond(finite, finite_loss, fallback_loss, y_pred)
 
 
 def _component_scales(y, eps=1e-8):
-    """Per-output standard deviations used to standardize losses."""
+    """Per-output standard deviations used to standardize losses.
+    
+    Args:
+        y (jnp.ndarray): Batch of data to measure spread of, shape `(N, C)`.
+        eps (float): Minimum standard deviation value for numerical stability.
+        
+    Returns:
+        jnp.ndarray: Component-wise standard deviation, shape `(C,)`.
+    """
+    # Use max against eps to avoid zero variances
     return jnp.maximum(jnp.std(y, axis=0), eps)
 
 
 def _component_rms(y, eps=1e-8):
-    """Per-output RMS magnitude used for zero-centered residual normalization."""
+    """Per-output RMS magnitude used for zero-centered residual normalization.
+    
+    Args:
+        y (jnp.ndarray): Batch of data, shape `(N, C)`.
+        eps (float): Minimum RMS magnitude.
+        
+    Returns:
+        jnp.ndarray: Component-wise RMS, shape `(C,)`.
+    """
+    # Standardize by energy/magnitude rather than centered spread
     return jnp.maximum(jnp.sqrt(jnp.mean(y**2, axis=0)), eps)
 
 
 def _assign_u_bins(x, edges, eps=1e-12):
-    """Assign each sample to a compactness bin, with compactness `u = 1/r`."""
+    """Assign each sample to a compactness bin, with compactness `u = 1/r`.
+    
+    Args:
+        x (jnp.ndarray): Input batch, shape `(N, 5)`, where index 1 is radius `r`.
+        edges (jnp.ndarray): 1D array of bin edges for `u`.
+        eps (float): Minimum `r` margin.
+        
+    Returns:
+        jnp.ndarray: Array of bin indices, shape `(N,)`.
+    """
     r_safe = jnp.maximum(jnp.abs(x[:, 1]), eps)
     u = 1.0 / r_safe
+    # Bin via searchsorted (side='right'), then clip to valid bucket span
     bin_idx = jnp.searchsorted(edges[1:], u, side="right")
     return jnp.clip(bin_idx, 0, edges.shape[0] - 2)
 
@@ -122,11 +182,24 @@ def _build_u_binned_residual_scales(
     Each bin gets per-component scales from residual RMS (around zero), with guards:
     - sparse bins fallback to global scales (`min_bin_count`)
     - scales are floored by `floor_frac * global_scale` to avoid tiny divisors
+    
+    Args:
+        x (jnp.ndarray): Input batch, shape `(N, 5)`.
+        delta (jnp.ndarray): Residual array, shape `(N, C)`.
+        num_bins (int): Number of piecewise bins over `u`.
+        eps (float): Minimum positive value threshold.
+        min_bin_count (int): Bins with few points default to global RMS.
+        floor_frac (float): Minimal fractional value allowed relative to global RMS.
+        
+    Returns:
+        Tuple containing bin edges, bin assignment arrays, and the RMS table per bin.
     """
     r_safe = jnp.maximum(jnp.abs(x[:, 1]), eps)
     u = 1.0 / r_safe
     u_min = float(jnp.min(u))
     u_max = float(jnp.max(u))
+    
+    # Early exit if bins are degenerate or a single bin was requested
     if (num_bins <= 1) or (u_max <= u_min):
         edges = jnp.array([u_min, u_max + eps], dtype=u.dtype)
         return edges, jnp.zeros((x.shape[0],), dtype=jnp.int32), _component_rms(delta, eps)[None, :]
@@ -136,21 +209,40 @@ def _build_u_binned_residual_scales(
     global_scales = _component_rms(delta, eps)
     floor_frac = max(0.0, float(floor_frac))
     scale_floor = floor_frac * global_scales
+    
     scales = []
     for b in range(num_bins):
+        # Determine subset of points falling in the bin
         mask = (bin_idx == b).astype(delta.dtype)[:, None]
         count = jnp.sum(mask[:, 0])
         denom = jnp.maximum(count, 1.0)
+        
+        # Calculate RMS solely on valid mask subset
         rms_b = jnp.sqrt(jnp.maximum(jnp.sum((delta**2) * mask, axis=0) / denom, eps**2))
+        
+        # Guard: Use global scale if the bin is under-populated
         rms_b = jnp.where(count >= min_bin_count, rms_b, global_scales)
+        
+        # Guard: Regularize to avoid overly small scales driving exploding gradients
         rms_b = jnp.maximum(rms_b, scale_floor)
         scales.append(rms_b)
+        
     scale_table = jnp.stack(scales, axis=0)
     return edges, bin_idx, scale_table
 
 
 def _standardized_vf_loss_from_pred(y_pred, y_true, vf_scales, eps=1e-8):
-    """Standardized vector-field MSE."""
+    """Standardized vector-field MSE.
+    
+    Args:
+        y_pred (jnp.ndarray): Predicted RHS batch, shape `(N, C)`.
+        y_true (jnp.ndarray): Target RHS batch, shape `(N, C)`.
+        vf_scales (jnp.ndarray): Array of component scales, shape `(C,)`.
+        eps (float): Numerical stability term.
+        
+    Returns:
+        jnp.ndarray: The mean squared standardized error.
+    """
     err = (y_pred - y_true) / (vf_scales[None, :] + eps)
     return jnp.mean(err**2)
 
@@ -161,6 +253,14 @@ def _componentwise_relative_error_metrics_from_pred(y_pred, y_true, eps=1e-12):
     Relative error per component is defined as:
         abs((y_pred_i - y_true_i) / y_true_i)
     with denominator regularized by `eps` for numerical stability.
+
+    Args:
+        y_pred (jnp.ndarray): Predicted RHS batch.
+        y_true (jnp.ndarray): Target RHS batch.
+        eps (float): Denominator regularization.
+    
+    Returns:
+        tuple: (Global relative error mean, Component-wise relative error mean array)
     """
     rel_abs = jnp.abs(y_pred - y_true) / (jnp.abs(y_true) + eps)
     rel_abs_mean = jnp.mean(rel_abs)
@@ -169,12 +269,32 @@ def _componentwise_relative_error_metrics_from_pred(y_pred, y_true, eps=1e-12):
 
 
 def _relative_error_matrix_from_pred(y_pred, y_true, eps=1e-12):
-    """Per-sample, per-component relative error matrix."""
+    """Per-sample, per-component relative error matrix.
+    
+    Args:
+        y_pred (jnp.ndarray): Predicted RHS.
+        y_true (jnp.ndarray): Target RHS.
+        eps (float): Denominator regularization.
+        
+    Returns:
+        jnp.ndarray: Matrix of absolute relative errors.
+    """
     return jnp.abs((y_pred - y_true) / (jnp.abs(y_true) + eps))
 
 
 def _relative_error_summary(rel: Union[jnp.ndarray, np.ndarray]) -> Dict[str, Union[float, np.ndarray]]:
-    """Robust summary for relative-error arrays with finite filtering."""
+    """Robust summary for relative-error arrays with finite filtering.
+    
+    Aggregates a matrix of relative errors into mean and 95th-percentile (p95) overall,
+    and also breaks them out per component, effectively ignoring NaN/Inf outliers which 
+    can frequently occur when ground truth is nearly zero.
+    
+    Args:
+        rel (Union[jnp.ndarray, np.ndarray]): 2D array of relative errors.
+        
+    Returns:
+        Dict: Contains 'mean', 'p95', 'comp_mean', 'comp_p95', and 'finite_ratio'.
+    """
     arr = np.asarray(rel, dtype=np.float64)
     if arr.ndim != 2:
         raise ValueError(f"Expected relative error array with shape (N, C), got {arr.shape}.")
@@ -213,7 +333,18 @@ def _relative_error_summary(rel: Union[jnp.ndarray, np.ndarray]) -> Dict[str, Un
 
 
 def _split_supervision_data(data, split_name: str):
-    """Accept (x, y) or (x, y, e_rel_ref)."""
+    """Accept (x, y) or (x, y, e_rel_ref) structured data.
+    
+    Helper function to safely unpack training or validation tuples that might natively include
+    an extra reference array for relative-error stopping conditions.
+    
+    Args:
+        data (tuple or list): Validation or train data tuple.
+        split_name (str): The dataset's name (for descriptive errors).
+        
+    Returns:
+        tuple: Extracted `x, y, e_rel_ref` matching the signature where `e_rel_ref` defaults to None.
+    """
     if not isinstance(data, (tuple, list)):
         raise TypeError(f"{split_name} data must be tuple/list, got {type(data)}.")
     if len(data) < 2:
@@ -224,7 +355,12 @@ def _split_supervision_data(data, split_name: str):
 
 
 def save_model_weights(model, path: str):
-    """Save model parameters for future reloading."""
+    """Save model parameters for future reloading.
+    
+    Args:
+        model (eqx.Module): The current model.
+        path (str): Filepath to serialize Equinox leaves to.
+    """
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     eqx.tree_serialise_leaves(str(out_path), model)
@@ -232,7 +368,16 @@ def save_model_weights(model, path: str):
 
 
 def load_model_weights(model, path: str, strict: bool = True):
-    """Load model parameters into an existing model structure."""
+    """Load model parameters into an existing model structure.
+    
+    Args:
+        model (eqx.Module): Base module structure to load parameters into.
+        path (str): Filepath to deserialize from.
+        strict (bool): Raise an exception if the file isn't found instead of warning.
+        
+    Returns:
+        eqx.Module: The loaded model state.
+    """
     in_path = Path(path)
     if not in_path.exists():
         msg = f"Weight file not found: {in_path}"
@@ -246,7 +391,18 @@ def load_model_weights(model, path: str, strict: bool = True):
 
 
 def _standardized_residual_loss_from_pred(y_pred, y_true, y_base, residual_scales, eps=1e-8):
-    """Standardized residual-to-baseline MSE."""
+    """Standardized residual-to-baseline MSE.
+    
+    Args:
+        y_pred (jnp.ndarray): Predictions.
+        y_true (jnp.ndarray): Ground truth.
+        y_base (jnp.ndarray): Baseline model predictions.
+        residual_scales (jnp.ndarray): Array of heteroscedastic scaling terms.
+        eps (float): Numerical safety bound.
+        
+    Returns:
+        jnp.ndarray: The standardized MSE.
+    """
     delta_pred = y_pred - y_base
     delta_true = y_true - y_base
     err = (delta_pred - delta_true) / (residual_scales + eps)
@@ -254,24 +410,46 @@ def _standardized_residual_loss_from_pred(y_pred, y_true, y_base, residual_scale
 
 
 def _standardized_residual_loss_from_delta(delta_pred, delta_true, residual_scales, eps=1e-8):
-    """Standardized residual MSE from pre-computed residuals."""
+    """Standardized residual MSE from pre-computed residuals.
+    
+    Args:
+        delta_pred (jnp.ndarray): Predicted residual (from baseline).
+        delta_true (jnp.ndarray): Target residual (from baseline).
+        residual_scales (jnp.ndarray): Array of scaling terms.
+        eps (float): Safety term limit.
+        
+    Returns:
+        jnp.ndarray: The standardized MSE.
+    """
     err = (delta_pred - delta_true) / (residual_scales + eps)
     return jnp.mean(err**2)
 
 
 def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, tol: float = 1e-14):
-    """Detect obvious target-layout issues before expensive training starts."""
+    """Detect obvious target-layout issues before expensive training starts.
+    
+    Ensures input targets comply with this dataset's explicit structural assumption
+    of [dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt].
+    
+    Args:
+        y (jnp.ndarray): Output targets.
+        split_name (str): Label for errors.
+        strict (bool): Should anomalous datasets trigger an exception or just a warning?
+        tol (float): Tolerance for detecting structural duplicates across columns.
+    """
     if y.ndim != 2 or y.shape[1] != 4:
         msg = f"{split_name}: expected RHS shape (N, 4), got {tuple(y.shape)}."
         raise ValueError(msg)
 
     duplicate_pairs = []
+    # Exhaustively search for duplicate channels indicating flawed extraction.
     for i in range(4):
         for j in range(i + 1, 4):
             max_abs_diff = jnp.max(jnp.abs(y[:, i] - y[:, j]))
             if float(max_abs_diff) <= tol:
                 duplicate_pairs.append((i, j))
 
+    # Expect mostly positive dphi/dt if channel 1 is correctly assigned.
     omega_nonpos_ratio = float(jnp.mean(y[:, 1] <= 0.0))
     issues = []
     if duplicate_pairs:
@@ -299,14 +477,30 @@ def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, 
 
 
 def _masked_mean(values: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
-    """Mean over masked samples (returns 0 when mask is empty)."""
+    """Mean over masked samples (returns 0 when mask is empty).
+    
+    Args:
+        values (jnp.ndarray): An array to be averaged.
+        mask (jnp.ndarray): Binary mask outlining indices to incorporate.
+        
+    Returns:
+        jnp.ndarray: Average scalar, zeroed if the entire mask is empty.
+    """
     mask_f = mask.astype(values.dtype)
     denom = jnp.maximum(jnp.sum(mask_f), 1.0)
     return jnp.sum(values * mask_f) / denom
 
 
 def _safe_log_abs(x: jnp.ndarray, eps: float = 1e-8) -> jnp.ndarray:
-    """Stable log(|x|)."""
+    """Stable log(|x|).
+    
+    Args:
+        x (jnp.ndarray): Array of potentially small or zero values.
+        eps (float): Float floor to truncate argument.
+        
+    Returns:
+        jnp.ndarray: Bounded equivalent of `log(abs(x))`.
+    """
     return jnp.log(jnp.maximum(jnp.abs(x), eps))
 
 def train_dhnn_model_prelim(
@@ -880,6 +1074,19 @@ def train_blackbox_dhnn_model_prelim(
 
     @eqx.filter_jit
     def step(model, opt_state, x, y, vf_scales, vf_ref):
+        """Executes a single optimizer step using raw MSE.
+        
+        Args:
+            model (eqx.Module): The DHNN model.
+            opt_state: The current Optax state.
+            x (jnp.ndarray): Input batch.
+            y (jnp.ndarray): Target batch.
+            vf_scales (jnp.ndarray): Normalization scales.
+            vf_ref (jnp.ndarray): Baseline loss reference.
+            
+        Returns:
+            Tuple containing updated model, updated opt_state, and loss tracking scalar metrics.
+        """
         def loss_fn(m):
             y_pred = m(x)
             l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
@@ -895,6 +1102,15 @@ def train_blackbox_dhnn_model_prelim(
         return model, opt_state, loss_value, l_vf, l_vf_norm
 
     def finite_output_ratio(model, x):
+        """Calculates the ratio of model outputs that are safe (finite) for tracking instability.
+        
+        Args:
+            model (eqx.Module): Evaluated model.
+            x (jnp.ndarray): Input samples.
+            
+        Returns:
+            jnp.ndarray: Ratio of finite samples.
+        """
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
@@ -1159,6 +1375,25 @@ def train_hybrid_eob_dhnn_model_prelim(
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
     def hybrid_loss_terms(m, x, y, q_gain, geom_gain):
+        """Evaluate the multi-objective loss for the Hybrid EOB model.
+        
+        Evaluates the standard vector field loss, alongside component-specific structural
+        losses including:
+        - Geometric energy flux matching (`l_flux`)
+        - Angular momentum flow (`l_omega`) 
+        - Conservative flow (`l_cons`)
+        - Strong field potential mappings (`l_q_raw`)
+        
+        Args:
+            m (eqx.Module): Evaluated Model.
+            x (jnp.ndarray): Input batch.
+            y (jnp.ndarray): Target RHS.
+            q_gain (float): Ramp weight applied to Q scalar matching term.
+            geom_gain (float): Ramp weight applied to geometry component matching terms.
+            
+        Returns:
+            Tuple containing total combined loss and auxiliary unpackable individual losses.
+        """
         y_pred = m(x)
         l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
         l_vf_norm = l_vf / vf_ref
@@ -1202,6 +1437,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         l_q_raw = _masked_mean(((dr_ratio_pred - dr_ratio_true) / (q_scale + eps)) ** 2, mask_q)
         l_q = q_gain * l_q_raw
 
+        # Combine losses based on curriculum weighting scales
         l_total = (
             w_vf * l_vf_norm
             + geom_gain * w_flux * l_flux
@@ -1214,6 +1450,19 @@ def train_hybrid_eob_dhnn_model_prelim(
 
     @eqx.filter_jit
     def step(model, opt_state, x, y, q_gain, geom_gain):
+        """Single optimization step updating model configuration towards multi-objective loss.
+        
+        Args:
+            model (eqx.Module): EOB Hybrid DHNN to update.
+            opt_state: Optimizer state containing moments.
+            x (jnp.ndarray): Input conditions.
+            y (jnp.ndarray): True target RHS predictions.
+            q_gain (float): Active weight for Q optimization.
+            geom_gain (float): Active weight for structural optimization.
+            
+        Returns:
+            Tuple with the updated model parameters, opt_state, and expanded tracking variables.
+        """
         def loss_fn(m):
             return hybrid_loss_terms(m, x, y, q_gain, geom_gain)
 
@@ -1237,10 +1486,25 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
 
     def finite_output_ratio(model, x):
+        """Returns ratio of valid/finite network outputs across an evaluation batch."""
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
     def r_binned_val_metrics(model, x_val, y_val, q_gain, geom_gain):
+        """Discretize validation responses across radial separation distance (`r`) bins.
+        
+        Helps isolate areas in phase-space where structural breakdowns occur (e.g. merger).
+        
+        Args:
+            model (eqx.Module): Model predicting the properties.
+            x_val (jnp.ndarray): Validation input space.
+            y_val (jnp.ndarray): Validation target targets.
+            q_gain (float): Evaluation scalar weight.
+            geom_gain (float): Evaluation spatial evaluation weight.
+            
+        Returns:
+            list: Dictionary table denoting metrics calculated solely inside bounds of `r_bin_edges`.
+        """
         r_abs_val_np = np.asarray(jnp.abs(x_val[:, 1]))
         rows = []
         for b in range(num_r_bins):
@@ -1277,6 +1541,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         return rows
 
     def compact_r_binned_summary(rows):
+        """Compile a compact presentation layer tracking the highest-loss radial boundaries."""
         if len(rows) == 0:
             return {"weighted": {}, "worst": []}
         metric_keys = ("vf", "flux", "omega", "cons", "q")
@@ -1483,7 +1748,7 @@ if __name__ == "__main__":
     seed = 0
     key = jax.random.PRNGKey(seed)
     training_params = {
-        "experiment": "hybrid_eob",
+        "experiment": "eob_v2",
         "learning_rate": 3e-4,
         "lr_init": 3e-5,
         "lr_end": 3e-6,
@@ -1605,10 +1870,21 @@ if __name__ == "__main__":
             "f_corr_bound": 0.1,
             "delta_corr_bound": 0.1,
         }
+    elif experiment == "eob_v1":
+        model_params = {
+            "key": key,
+            "model_class": Neural_EOB,
+            "srate": 2000,
+            "hidden_dim_A": 64,
+            "hidden_dim_D": 64,
+            "hidden_dim_Q": 64,
+            "hidden_dim_f": 64,
+            "hidden_dim_delta": 64,
+        }
     else:
         raise ValueError(
             f"Unknown training_params['experiment']={experiment!r}. "
-            "Use 'blackbox', 'hybrid_eob', or 'eob_v2'."
+            "Use 'blackbox', 'hybrid_eob', 'eob_v1', or 'eob_v2'."
         )
     # load training data
     x_train = jnp.load("seob_x_train_prelim.npy")

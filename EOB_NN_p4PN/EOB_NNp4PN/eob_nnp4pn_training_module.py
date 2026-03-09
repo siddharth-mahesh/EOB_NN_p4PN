@@ -1,8 +1,10 @@
 """
-This file contains the Neural_EOB class,
-which implements the non-spinning 3PN Effective One Body model
-with 3.5PN circular radiation-reaction
-and neural post-4PN terms.
+Training Module for Neural EOB.
+
+This module adapts the `Neural_EOB` class for continuous training, implementing 
+the non-spinning 3PN Effective One Body (EOB) model with neural post-4PN terms.
+Provides methods optimized for forward passes and gradient computations 
+within neural network optimization loops.
 """
 
 I = 1j

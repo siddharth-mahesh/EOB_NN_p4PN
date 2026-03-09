@@ -1,3 +1,11 @@
+"""
+Main training script for the Neural EOB model.
+
+Defines the core loss functions (direct waveform loss, merger time loss, and 
+physics-informed loss components) and provides the `train_dhnn_model` 
+routine to optimize the Neural EOB components using JAX and Optax.
+"""
+
 from typing import Dict, Tuple, Union
 
 import equinox as eqx

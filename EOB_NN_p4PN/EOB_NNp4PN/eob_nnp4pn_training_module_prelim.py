@@ -1,8 +1,9 @@
 """
-This file contains the Neural_EOB class,
-which implements the non-spinning 3PN Effective One Body model
-with 3.5PN circular radiation-reaction
-and neural post-4PN terms.
+Preliminary Training Module for Neural EOB.
+
+This module implements an earlier or alternative version of the `Neural_EOB` class 
+for training with post-4PN terms. Uses scaled rational networks to fit the EOB potentials 
+and provides RHS predictions for the Dissipative Hamiltonian system.
 """
 
 I = 1j

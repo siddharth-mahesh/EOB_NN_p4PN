@@ -1,4 +1,10 @@
-"""Black-box dissipative Hamiltonian neural network for RHS regression baselines."""
+"""
+Black-box Dissipative Hamiltonian Neural Network (DHNN).
+
+This module provides a generic DHNN baseline for RHS regression, predicting conservative 
+and dissipative flows using Multi-Layer Perceptrons (MLPs). It serves as a structure-free
+baseline to compare against more physically-informed EOB neural models.
+"""
 
 from typing import Tuple
 
