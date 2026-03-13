@@ -45,7 +45,9 @@ from EOB_NN_p4PN.EOB_NNp4PN.eob_nnp4pn_training_module_blackbox import BlackBoxD
 from EOB_NN_p4PN.EOB_NNp4PN.eob_nnp4pn_training_module_hybrid import Hybrid_EOB_DHNN
 
 def vector_field_loss(model, x, y, weights=None):
-    """Plain MSE on RHS components.
+    """vector_field_loss
+    
+    Plain MSE on RHS components.
 
     This helper is kept as a minimal reference loss and for quick debugging.
     The main training path below uses standardized losses.
@@ -68,7 +70,9 @@ def vector_field_loss(model, x, y, weights=None):
     return jnp.mean(squared_error)
 
 def single_case_PN_rescaled_vector_field_loss(x, y, y_nn):
-    """Single-sample PN-rescaled squared error.
+    """single_case_PN_rescaled_vector_field_loss
+    
+    Single-sample PN-rescaled squared error.
 
     Error is divided by `u^8` (`u = 1/r`) to upweight weak-field mismatch where
     high-PN effects are relatively suppressed.
@@ -91,7 +95,9 @@ def single_case_PN_rescaled_vector_field_loss(x, y, y_nn):
 
 
 def PN_rescaled_vector_field_loss(model, x, y, weights=None):
-    """Batch PN-rescaled loss with finite-output guard.
+    """PN_rescaled_vector_field_loss
+    
+    Batch PN-rescaled loss with finite-output guard.
 
     If any model output is non-finite, returns a large fallback value to prevent
     invalid gradients from corrupting optimizer state.
@@ -123,7 +129,9 @@ def PN_rescaled_vector_field_loss(model, x, y, weights=None):
 
 
 def _component_scales(y, eps=1e-8):
-    """Per-output standard deviations used to standardize losses.
+    """_component_scales
+    
+    Per-output standard deviations used to standardize losses.
     
     Args:
         y (jnp.ndarray): Batch of data to measure spread of, shape `(N, C)`.
@@ -137,7 +145,9 @@ def _component_scales(y, eps=1e-8):
 
 
 def _component_rms(y, eps=1e-8):
-    """Per-output RMS magnitude used for zero-centered residual normalization.
+    """_component_rms
+    
+    Per-output RMS magnitude used for zero-centered residual normalization.
     
     Args:
         y (jnp.ndarray): Batch of data, shape `(N, C)`.
@@ -151,7 +161,9 @@ def _component_rms(y, eps=1e-8):
 
 
 def _assign_u_bins(x, edges, eps=1e-12):
-    """Assign each sample to a compactness bin, with compactness `u = 1/r`.
+    """_assign_u_bins
+    
+    Assign each sample to a compactness bin, with compactness `u = 1/r`.
     
     Args:
         x (jnp.ndarray): Input batch, shape `(N, 5)`, where index 1 is radius `r`.
@@ -232,7 +244,9 @@ def _build_u_binned_residual_scales(
 
 
 def _standardized_vf_loss_from_pred(y_pred, y_true, vf_scales, eps=1e-8):
-    """Standardized vector-field MSE.
+    """_standardized_vf_loss_from_pred
+    
+    Standardized vector-field MSE.
     
     Args:
         y_pred (jnp.ndarray): Predicted RHS batch, shape `(N, C)`.
@@ -248,7 +262,9 @@ def _standardized_vf_loss_from_pred(y_pred, y_true, vf_scales, eps=1e-8):
 
 
 def _componentwise_relative_error_metrics_from_pred(y_pred, y_true, eps=1e-12):
-    """Componentwise relative error metrics.
+    """_componentwise_relative_error_metrics_from_pred
+    
+    Componentwise relative error metrics.
 
     Relative error per component is defined as:
         abs((y_pred_i - y_true_i) / y_true_i)
@@ -269,7 +285,9 @@ def _componentwise_relative_error_metrics_from_pred(y_pred, y_true, eps=1e-12):
 
 
 def _relative_error_matrix_from_pred(y_pred, y_true, eps=1e-12):
-    """Per-sample, per-component relative error matrix.
+    """_relative_error_matrix_from_pred
+    
+    Per-sample, per-component relative error matrix.
     
     Args:
         y_pred (jnp.ndarray): Predicted RHS.
@@ -283,7 +301,9 @@ def _relative_error_matrix_from_pred(y_pred, y_true, eps=1e-12):
 
 
 def _relative_error_summary(rel: Union[jnp.ndarray, np.ndarray]) -> Dict[str, Union[float, np.ndarray]]:
-    """Robust summary for relative-error arrays with finite filtering.
+    """_relative_error_summary
+    
+    Robust summary for relative-error arrays with finite filtering.
     
     Aggregates a matrix of relative errors into mean and 95th-percentile (p95) overall,
     and also breaks them out per component, effectively ignoring NaN/Inf outliers which 
@@ -333,7 +353,9 @@ def _relative_error_summary(rel: Union[jnp.ndarray, np.ndarray]) -> Dict[str, Un
 
 
 def _split_supervision_data(data, split_name: str):
-    """Accept (x, y) or (x, y, e_rel_ref) structured data.
+    """_split_supervision_data
+    
+    Accept (x, y) or (x, y, e_rel_ref) structured data.
     
     Helper function to safely unpack training or validation tuples that might natively include
     an extra reference array for relative-error stopping conditions.
@@ -355,7 +377,9 @@ def _split_supervision_data(data, split_name: str):
 
 
 def save_model_weights(model, path: str):
-    """Save model parameters for future reloading.
+    """save_model_weights
+    
+    Save model parameters for future reloading.
     
     Args:
         model (eqx.Module): The current model.
@@ -368,7 +392,9 @@ def save_model_weights(model, path: str):
 
 
 def load_model_weights(model, path: str, strict: bool = True):
-    """Load model parameters into an existing model structure.
+    """load_model_weights
+    
+    Load model parameters into an existing model structure.
     
     Args:
         model (eqx.Module): Base module structure to load parameters into.
@@ -391,7 +417,9 @@ def load_model_weights(model, path: str, strict: bool = True):
 
 
 def _standardized_residual_loss_from_pred(y_pred, y_true, y_base, residual_scales, eps=1e-8):
-    """Standardized residual-to-baseline MSE.
+    """_standardized_residual_loss_from_pred
+    
+    Standardized residual-to-baseline MSE.
     
     Args:
         y_pred (jnp.ndarray): Predictions.
@@ -410,7 +438,9 @@ def _standardized_residual_loss_from_pred(y_pred, y_true, y_base, residual_scale
 
 
 def _standardized_residual_loss_from_delta(delta_pred, delta_true, residual_scales, eps=1e-8):
-    """Standardized residual MSE from pre-computed residuals.
+    """_standardized_residual_loss_from_delta
+    
+    Standardized residual MSE from pre-computed residuals.
     
     Args:
         delta_pred (jnp.ndarray): Predicted residual (from baseline).
@@ -426,7 +456,9 @@ def _standardized_residual_loss_from_delta(delta_pred, delta_true, residual_scal
 
 
 def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, tol: float = 1e-14):
-    """Detect obvious target-layout issues before expensive training starts.
+    """_validate_rhs_targets
+    
+    Detect obvious target-layout issues before expensive training starts.
     
     Ensures input targets comply with this dataset's explicit structural assumption
     of [dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt].
@@ -477,7 +509,9 @@ def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, 
 
 
 def _masked_mean(values: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
-    """Mean over masked samples (returns 0 when mask is empty).
+    """_masked_mean
+    
+    Mean over masked samples (returns 0 when mask is empty).
     
     Args:
         values (jnp.ndarray): An array to be averaged.
@@ -492,7 +526,9 @@ def _masked_mean(values: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
 
 
 def _safe_log_abs(x: jnp.ndarray, eps: float = 1e-8) -> jnp.ndarray:
-    """Stable log(|x|).
+    """_safe_log_abs
+    
+    Stable log(|x|).
     
     Args:
         x (jnp.ndarray): Array of potentially small or zero values.
@@ -825,12 +861,16 @@ def train_dhnn_model_prelim(
         )
 
     def finite_output_ratio(model, x):
-        """Fraction of finite model outputs over a batch."""
+        """finite_output_ratio
+        
+        Fraction of finite model outputs over a batch."""
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
     def blend_beta(epoch):
-        """Linear blend coefficient from VF loss to residual loss."""
+        """blend_beta
+        
+        Linear blend coefficient from VF loss to residual loss."""
         if epoch < stage0_epochs:
             return beta_start
         if epoch >= blend_end_epochs:
@@ -839,14 +879,18 @@ def train_dhnn_model_prelim(
         return beta_start + (1.0 - beta_start) * progress
 
     def jac_weight_at_epoch(epoch):
-        """Piecewise-linear schedule for Jacobian regularization weight."""
+        """jac_weight_at_epoch
+        
+        Piecewise-linear schedule for Jacobian regularization weight."""
         if epoch < jacobian_start_epoch:
             return 0.0
         ramp = (epoch - jacobian_start_epoch + 1) / jacobian_ramp_epochs
         return jacobian_weight * min(1.0, ramp)
 
     def escape_gamma_at_epoch(epoch):
-        """Residual amplification factor during the escape phase."""
+        """escape_gamma_at_epoch
+        
+        Residual amplification factor during the escape phase."""
         if escape_epochs <= 0:
             return 1.0
         if epoch >= escape_epochs:
@@ -855,13 +899,17 @@ def train_dhnn_model_prelim(
         return escape_gamma_start + progress * (escape_gamma_end - escape_gamma_start)
 
     def escape_weight_at_epoch(epoch):
-        """Decaying strength for strong-field escape regularization."""
+        """escape_weight_at_epoch
+        
+        Decaying strength for strong-field escape regularization."""
         if (escape_epochs <= 0) or (epoch >= escape_epochs):
             return 0.0
         return escape_weight * (1.0 - (epoch / max(1, escape_epochs)))
 
     def sample_epoch_batch_indices(key_epoch, epoch):
-        """Sample fixed-shape batch indices, with optional high-u oversampling."""
+        """sample_epoch_batch_indices
+        
+        Sample fixed-shape batch indices, with optional high-u oversampling."""
         escape_sampling_active = (
             (epoch < escape_epochs)
             and (escape_high_u_frac > 0.0)
@@ -1074,7 +1122,9 @@ def train_blackbox_dhnn_model_prelim(
 
     @eqx.filter_jit
     def step(model, opt_state, x, y, vf_scales, vf_ref):
-        """Executes a single optimizer step using raw MSE.
+        """step
+        
+        Executes a single optimizer step using raw MSE.
         
         Args:
             model (eqx.Module): The DHNN model.
@@ -1102,7 +1152,9 @@ def train_blackbox_dhnn_model_prelim(
         return model, opt_state, loss_value, l_vf, l_vf_norm
 
     def finite_output_ratio(model, x):
-        """Calculates the ratio of model outputs that are safe (finite) for tracking instability.
+        """finite_output_ratio
+        
+        Calculates the ratio of model outputs that are safe (finite) for tracking instability.
         
         Args:
             model (eqx.Module): Evaluated model.
@@ -1374,8 +1426,10 @@ def train_hybrid_eob_dhnn_model_prelim(
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
-    def hybrid_loss_terms(m, x, y, q_gain, geom_gain):
-        """Evaluate the multi-objective loss for the Hybrid EOB model.
+    def hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
+        """hybrid_loss_terms
+        
+        Evaluate the multi-objective loss for the Hybrid EOB model.
         
         Evaluates the standard vector field loss, alongside component-specific structural
         losses including:
@@ -1390,6 +1444,10 @@ def train_hybrid_eob_dhnn_model_prelim(
             y (jnp.ndarray): Target RHS.
             q_gain (float): Ramp weight applied to Q scalar matching term.
             geom_gain (float): Ramp weight applied to geometry component matching terms.
+            w_flux_dyn (float): Dynamic EMA inverse weight for flux loss.
+            w_omega_dyn (float): Dynamic EMA inverse weight for omega loss.
+            w_cons_dyn (float): Dynamic EMA inverse weight for conservative loss.
+            w_q_dyn (float): Dynamic EMA inverse weight for Q potential loss.
             
         Returns:
             Tuple containing total combined loss and auxiliary unpackable individual losses.
@@ -1437,20 +1495,21 @@ def train_hybrid_eob_dhnn_model_prelim(
         l_q_raw = _masked_mean(((dr_ratio_pred - dr_ratio_true) / (q_scale + eps)) ** 2, mask_q)
         l_q = q_gain * l_q_raw
 
-        # Combine losses based on curriculum weighting scales
+        # Combine losses based on curriculum weighting scales and adaptive components
         l_total = (
             w_vf * l_vf_norm
-            + geom_gain * w_flux * l_flux
-            + geom_gain * w_omega * l_omega
-            + geom_gain * w_cons * l_cons
-            + w_q * l_q
+            + geom_gain * w_flux * w_flux_dyn * l_flux
+            + geom_gain * w_omega * w_omega_dyn * l_omega
+            + geom_gain * w_cons * w_cons_dyn * l_cons
+            + w_q * w_q_dyn * l_q
         )
-        l_total = l_vf
         return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(model, opt_state, x, y, q_gain, geom_gain):
-        """Single optimization step updating model configuration towards multi-objective loss.
+    def step(model, opt_state, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
+        """step
+        
+        Single optimization step updating model configuration towards multi-objective loss.
         
         Args:
             model (eqx.Module): EOB Hybrid DHNN to update.
@@ -1459,12 +1518,16 @@ def train_hybrid_eob_dhnn_model_prelim(
             y (jnp.ndarray): True target RHS predictions.
             q_gain (float): Active weight for Q optimization.
             geom_gain (float): Active weight for structural optimization.
+            w_flux_dyn (float): Dynamic EMA weight for flux loss.
+            w_omega_dyn (float): Dynamic EMA weight for omega loss.
+            w_cons_dyn (float): Dynamic EMA weight for conservative loss.
+            w_q_dyn (float): Dynamic EMA weight for Q potential loss.
             
         Returns:
             Tuple with the updated model parameters, opt_state, and expanded tracking variables.
         """
         def loss_fn(m):
-            return hybrid_loss_terms(m, x, y, q_gain, geom_gain)
+            return hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn)
 
         (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         grads = eqx.filter(grads, eqx.is_array)
@@ -1486,12 +1549,16 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
 
     def finite_output_ratio(model, x):
-        """Returns ratio of valid/finite network outputs across an evaluation batch."""
+        """finite_output_ratio
+        
+        Returns ratio of valid/finite network outputs across an evaluation batch."""
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
     def r_binned_val_metrics(model, x_val, y_val, q_gain, geom_gain):
-        """Discretize validation responses across radial separation distance (`r`) bins.
+        """r_binned_val_metrics
+        
+        Discretize validation responses across radial separation distance (`r`) bins.
         
         Helps isolate areas in phase-space where structural breakdowns occur (e.g. merger).
         
@@ -1522,7 +1589,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             idx = jnp.asarray(idx_np, dtype=jnp.int32)
             x_bin = jnp.take(x_val, idx, axis=0)
             y_bin = jnp.take(y_val, idx, axis=0)
-            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, q_gain, geom_gain)
+            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, q_gain, geom_gain, 1.0, 1.0, 1.0, 1.0)
             l_vf_b, l_vf_norm_b, l_flux_b, l_omega_b, l_cons_b, l_q_b, *_ = aux_bin
             rows.append(
                 {
@@ -1541,7 +1608,9 @@ def train_hybrid_eob_dhnn_model_prelim(
         return rows
 
     def compact_r_binned_summary(rows):
-        """Compile a compact presentation layer tracking the highest-loss radial boundaries."""
+        """compact_r_binned_summary
+        
+        Compile a compact presentation layer tracking the highest-loss radial boundaries."""
         if len(rows) == 0:
             return {"weighted": {}, "worst": []}
         metric_keys = ("vf", "flux", "omega", "cons", "q")
@@ -1571,6 +1640,12 @@ def train_hybrid_eob_dhnn_model_prelim(
     last_val_pert_ratio = np.inf
     last_val_pert_ratio_comp = None
 
+    ema_l_flux = 1.0
+    ema_l_omega = 1.0
+    ema_l_cons = 1.0
+    ema_l_q = 1.0
+    ema_alpha = float(training_params.get("ema_alpha", 0.05))
+
     for epoch in range(int(training_params["adam_epochs"])):
         key, key_train = jax.random.split(key, 2)
         perm = jax.random.permutation(key_train, num_train_samples)
@@ -1598,6 +1673,22 @@ def train_hybrid_eob_dhnn_model_prelim(
             q_gain_raw = min(1.0, (epoch - q_start_epoch + 1) / float(q_ramp_epochs))
         q_gain = geom_gain * q_gain_raw
 
+        # Calculate dynamic inverse EMA weights, normalized safely
+        w_flux_inv = 1.0 / max(float(ema_l_flux), eps)
+        w_omega_inv = 1.0 / max(float(ema_l_omega), eps)
+        w_cons_inv = 1.0 / max(float(ema_l_cons), eps)
+        w_q_inv = 1.0 / max(float(ema_l_q), eps)
+        
+        sum_inv = w_flux_inv + w_omega_inv + w_cons_inv + w_q_inv
+        
+        # Scale sum_inv to a base multiplier of 4.0
+        scale_fac = 4.0 / max(sum_inv, eps)
+        
+        dynamic_w_flux = w_flux_inv * scale_fac
+        dynamic_w_omega = w_omega_inv * scale_fac
+        dynamic_w_cons = w_cons_inv * scale_fac
+        dynamic_w_q = w_q_inv * scale_fac
+
         epoch_loss = 0.0
         epoch_l_vf = 0.0
         epoch_l_vf_norm = 0.0
@@ -1622,7 +1713,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 batch_l_q,
                 batch_rel_abs_mean,
                 batch_rel_abs_comp,
-            ) = step(model, opt_state, x_batch, y_batch, q_gain, geom_gain)
+            ) = step(model, opt_state, x_batch, y_batch, q_gain, geom_gain, dynamic_w_flux, dynamic_w_omega, dynamic_w_cons, dynamic_w_q)
             epoch_loss += batch_loss
             epoch_l_vf += batch_l_vf
             epoch_l_vf_norm += batch_l_vf_norm
@@ -1643,7 +1734,16 @@ def train_hybrid_eob_dhnn_model_prelim(
         train_rel_abs_mean = epoch_rel_abs_mean / num_train_batches
         train_rel_abs_comp = epoch_rel_abs_comp / num_train_batches
 
-        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, q_gain, geom_gain)
+        if train_l_flux > 0:
+            ema_l_flux = (1.0 - ema_alpha) * ema_l_flux + ema_alpha * float(train_l_flux)
+        if train_l_omega > 0:
+            ema_l_omega = (1.0 - ema_alpha) * ema_l_omega + ema_alpha * float(train_l_omega)
+        if train_l_cons > 0:
+            ema_l_cons = (1.0 - ema_alpha) * ema_l_cons + ema_alpha * float(train_l_cons)
+        if train_l_q > 0:
+            ema_l_q = (1.0 - ema_alpha) * ema_l_q + ema_alpha * float(train_l_q)
+
+        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, q_gain, geom_gain, 1.0, 1.0, 1.0, 1.0)
         (
             val_l_vf,
             val_l_vf_norm,
@@ -1748,7 +1848,7 @@ if __name__ == "__main__":
     seed = 0
     key = jax.random.PRNGKey(seed)
     training_params = {
-        "experiment": "eob_v2",
+        "experiment": "hybrid_eob",
         "learning_rate": 3e-4,
         "lr_init": 3e-5,
         "lr_end": 3e-6,

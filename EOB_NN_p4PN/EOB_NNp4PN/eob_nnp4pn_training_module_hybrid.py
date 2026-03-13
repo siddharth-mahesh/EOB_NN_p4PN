@@ -23,28 +23,47 @@ I = 1j
 
 
 class ScalarPotentialHead(eqx.Module):
-    """Two-input scalar head: inputs are [nu, x], output is one scalar."""
+    """two_input_scalar_head
+    
+    Two-input scalar head: inputs are [nu, x], output is one scalar.
+    """
 
     net: MLP
 
-    def __init__(self, key: jax.Array, input_dim, hidden_dim: int = 32, output_init_scale: float = 1e-3):
+    def __init__(self, key: jax.Array, input_dim: int, hidden_dim: int = 32, depth: int = 2, output_init_scale: float = 1e-3):
+        """initialize_scalar_head
+        
+        Initializes the scalar potential head with an parameterized MLP layer.
+        """
         self.net = MLP(
             key=key,
             input_dim=input_dim,
             output_dim=1,
             hidden_dim=hidden_dim,
+            depth=depth,
             standalone=False,
         )
         output_init_scale = float(max(output_init_scale, 0.0))
-        w_shape = self.net.lin_3.weight.shape
-        b_shape = self.net.lin_3.bias.shape
+        w_shape = self.net.layers[-1].weight.shape
+        b_shape = self.net.layers[-1].bias.shape
         w_key, b_key = jax.random.split(key, 2)
-        w_init = output_init_scale * jax.random.normal(w_key, w_shape, dtype=self.net.lin_3.weight.dtype)
-        b_init = output_init_scale * jax.random.normal(b_key, b_shape, dtype=self.net.lin_3.bias.dtype)
-        self.net = eqx.tree_at(lambda m: m.lin_3.weight, self.net, w_init)
-        self.net = eqx.tree_at(lambda m: m.lin_3.bias, self.net, b_init)
+        w_init = output_init_scale * jax.random.normal(w_key, w_shape, dtype=self.net.layers[-1].weight.dtype)
+        b_init = output_init_scale * jax.random.normal(b_key, b_shape, dtype=self.net.layers[-1].bias.dtype)
+        
+        # eqx.tree_at replaces the leaves. For tuple, we can use a small function.
+        def replace_last_layer_weight(m):
+            return m.layers[-1].weight
+        def replace_last_layer_bias(m):
+            return m.layers[-1].bias
+
+        self.net = eqx.tree_at(replace_last_layer_weight, self.net, w_init)
+        self.net = eqx.tree_at(replace_last_layer_bias, self.net, b_init)
 
     def __call__(self, neural_in: jax.Array) -> jax.Array:
+        """call
+        
+        Compute the forward evaluation.
+        """
         inp = jnp.array(neural_in, dtype=jnp.result_type(neural_in))
         return self.net(inp)[0]
 
@@ -82,6 +101,10 @@ class Hybrid_EOB_DHNN(eqx.Module):
         hidden_dim_D: int = 32,
         hidden_dim_Q: int = 32,
         hidden_dim_f: int = 32,
+        depth_A: int = 2,
+        depth_D: int = 2,
+        depth_Q: int = 2,
+        depth_f: int = 2,
         output_init_scale_A: float = 1e-3,
         output_init_scale_D: float = 1e-3,
         output_init_scale_Q: float = 1e-3,
@@ -90,16 +113,20 @@ class Hybrid_EOB_DHNN(eqx.Module):
         D_floor: float = 1e-4,
         Q_floor: float = 0.0,
         f_floor: float = 1e-4,
-        A_max: float = 4.0,
-        D_max: float = 4.0,
-        Q_max: float = 8.0,
-        f_max: float = 8.0,
+        A_max: float = 20.0,
+        D_max: float = 20.0,
+        Q_max: float = 20.0,
+        f_max: float = 20.0,
     ):
+        """initialize_hybrid_dhnn
+        
+        Initializes the Hybrid DHNN with tunable depth per potential and relaxed output ceilings.
+        """
         A_key, D_key, Q_key, f_key = jax.random.split(key, 4)
-        self.A_head = ScalarPotentialHead(A_key, 2, hidden_dim_A, output_init_scale_A)
-        self.D_head = ScalarPotentialHead(D_key, 2, hidden_dim_D, output_init_scale_D)
-        self.Q_head = ScalarPotentialHead(Q_key, 3, hidden_dim_Q, output_init_scale_Q)
-        self.f_head = ScalarPotentialHead(f_key, 2, hidden_dim_f, output_init_scale_f)
+        self.A_head = ScalarPotentialHead(A_key, 2, hidden_dim_A, depth_A, output_init_scale_A)
+        self.D_head = ScalarPotentialHead(D_key, 2, hidden_dim_D, depth_D, output_init_scale_D)
+        self.Q_head = ScalarPotentialHead(Q_key, 3, hidden_dim_Q, depth_Q, output_init_scale_Q)
+        self.f_head = ScalarPotentialHead(f_key, 2, hidden_dim_f, depth_f, output_init_scale_f)
         self._set_eob_constants_3PN = set_eob_constants_3PN
         self.srate = srate
 
@@ -114,34 +141,58 @@ class Hybrid_EOB_DHNN(eqx.Module):
 
     @staticmethod
     def _bounded_positive(raw: jax.Array, floor: float, vmax: float) -> jax.Array:
+        """bounded_positive
+        
+        Apply a bounding function that clips raw output via softplus and an upper bound limit.
+        """
         pos = floor + jax.nn.softplus(raw)
         return jnp.clip(pos, floor, vmax)
 
     def _a_potential(self, r: jax.Array, nu: jax.Array) -> jax.Array:
+        """a_potential
+        
+        Compute the conservative A potential.
+        """
         u = 1.0 / jnp.maximum(r, 1e-12)
         neural_in = jnp.array([nu, u], dtype=r.dtype)
         raw = self.A_head(neural_in)
         return self._bounded_positive(raw, self.A_floor, self.A_max)
 
     def _d_potential(self, r: jax.Array, nu: jax.Array) -> jax.Array:
+        """d_potential
+        
+        Compute the conservative D potential.
+        """
         u = 1.0 / jnp.maximum(r, 1e-12)
         neural_in = jnp.array([nu, u], dtype=r.dtype)
         raw = self.D_head(neural_in)
         return self._bounded_positive(raw, self.D_floor, self.D_max)
 
     def _q_potential(self, prstar: jax.Array, r: jax.Array, nu: jax.Array) -> jax.Array:
+        """q_potential
+        
+        Compute the strong-field modifying Q potential.
+        """
         u = 1.0 / jnp.maximum(r, 1e-12)
         neural_in = jnp.array([nu, u, prstar], dtype=r.dtype)
         raw = self.Q_head(neural_in)
         return self._bounded_positive(raw, self.Q_floor, self.Q_max)
 
     def _f_potential(self, omega: jax.Array, nu: jax.Array) -> jax.Array:
+        """f_potential
+        
+        Compute the f amplitude modifier for strain and flux.
+        """
         x = jnp.power(jnp.maximum(omega, 1e-12), 2.0 / 3.0)
         neural_in = jnp.array([nu, x], dtype=omega.dtype)
         raw = self.f_head(neural_in)
         return self._bounded_positive(raw, self.f_floor, self.f_max)
 
     def _strain(self, strain_qts: jax.Array, nu: jax.Array, constants) -> jax.Array:
+        """calculate_strain
+        
+        Calculate the modified leading mode 22 strain emission from potentials.
+        """
         phi, hnu, omega = strain_qts
         omega_safe = jnp.maximum(omega, 1e-12)
         r0 = 2 / jnp.sqrt(jnp.e)
@@ -163,10 +214,18 @@ class Hybrid_EOB_DHNN(eqx.Module):
         return h22
 
     def _flux(self, strain_qts: jax.Array, nu: jax.Array, constants) -> jax.Array:
+        """calculate_flux
+        
+        Calculate the energy flux from the leading mode strain.
+        """
         omega = jnp.maximum(strain_qts[2], 1e-12)
         return -omega * jnp.abs(self._strain(strain_qts, nu, constants)) ** 2 / (2 * jnp.pi * nu)
 
     def _hamiltonian(self, y: jax.Array, nu: jax.Array):
+        """calculate_hamiltonian
+        
+        Calculate the real EOB Hamiltonian and scale factor xi.
+        """
         r, _, p_rstar, p_phi = y
         u = 1.0 / jnp.maximum(r, 1e-12)
         a = self._a_potential(r, nu)
@@ -189,6 +248,10 @@ class Hybrid_EOB_DHNN(eqx.Module):
         return jnp.array([h_real, xi], dtype=y.dtype)
 
     def _single_rhs(self, x_single: jax.Array) -> jax.Array:
+        """calculate_single_rhs
+        
+        Calculate the right-hand side equations of motion for a single system state.
+        """
         nu = x_single[0]
         y = x_single[1:]
 
@@ -224,5 +287,9 @@ class Hybrid_EOB_DHNN(eqx.Module):
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
+        """call
+        
+        Calculate the batched right-hand side equations of motion.
+        """
         return jax.vmap(self._single_rhs, in_axes=0)(x)
 
