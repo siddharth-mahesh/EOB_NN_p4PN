@@ -81,17 +81,17 @@ class Hybrid_EOB_DHNN(eqx.Module):
     D_head: ScalarPotentialHead
     Q_head: ScalarPotentialHead
     f_head: ScalarPotentialHead
-    _set_eob_constants_3PN: Callable
+    _set_eob_constants_3PN: Callable = eqx.field(static=True)
     srate: int
 
-    A_floor: float
-    D_floor: float
-    Q_floor: float
-    f_floor: float
-    A_max: float
-    D_max: float
-    Q_max: float
-    f_max: float
+    A_floor: float = eqx.field(static=True)
+    D_floor: float = eqx.field(static=True)
+    Q_floor: float = eqx.field(static=True)
+    f_floor: float = eqx.field(static=True)
+    A_max: float = eqx.field(static=True)
+    D_max: float = eqx.field(static=True)
+    Q_max: float = eqx.field(static=True)
+    f_max: float = eqx.field(static=True)
 
     def __init__(
         self,

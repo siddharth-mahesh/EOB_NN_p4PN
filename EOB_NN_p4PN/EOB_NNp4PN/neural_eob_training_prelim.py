@@ -753,7 +753,8 @@ def train_dhnn_model_prelim(
 
     @eqx.filter_jit
     def step(
-        model,
+        diff_model,
+        static_model,
         opt_state,
         x,
         y,
@@ -842,13 +843,11 @@ def train_dhnn_model_prelim(
             (l_vf, l_res, l_vf_norm, l_res_norm, l_res_obj, l_jac, l_escape),
         ), grads = eqx.filter_value_and_grad(
             loss_fn, has_aux=True
-        )(model)
-        grads = eqx.filter(grads, eqx.is_array)
-        model_ = eqx.filter(model, eqx.is_array)
-        updates, opt_state = optimizer.update(grads, opt_state, model_)
-        model = eqx.apply_updates(model, updates)
+        )(diff_model)
+        updates, opt_state = optimizer.update(grads, opt_state, diff_model)
+        diff_model = eqx.apply_updates(diff_model, updates)
         return (
-            model,
+            diff_model,
             opt_state,
             loss_value,
             l_vf,
@@ -938,6 +937,54 @@ def train_dhnn_model_prelim(
             batches.append(batch_idx)
         return jnp.stack(batches, axis=0)
 
+    @eqx.filter_jit
+    def scan_epoch(diff_m, static_m, opt_state, batch_indices_in, beta, jac_w_arr, esc_gamma_arr, esc_w_arr, esc_u_thresh_arr, esc_margin_arr):
+        def scan_step(carry, batch_idx):
+            dm, opt = carry
+            x_train_batch = jnp.take(x_train, batch_idx, axis=0)
+            y_train_batch = jnp.take(y_train, batch_idx, axis=0)
+            y_base_batch = jnp.take(y_base_train, batch_idx, axis=0)
+            batch_bin_idx = jnp.take(train_bin_idx, batch_idx, axis=0)
+            residual_scales_batch = jnp.take(residual_scale_table, batch_bin_idx, axis=0)
+            x_jac_batch = x_train_batch[:jacobian_batch_size]
+            
+            (
+                dm_next,
+                opt_next,
+                b_loss,
+                b_l_vf,
+                b_l_res,
+                b_l_vf_norm,
+                b_l_res_norm,
+                b_l_res_obj,
+                b_l_jac,
+                b_l_escape,
+            ) = step(
+                dm,
+                static_m,
+                opt,
+                x_train_batch,
+                y_train_batch,
+                y_base_batch,
+                residual_scales_batch,
+                x_jac_batch,
+                vf_scales,
+                vf_ref,
+                res_ref,
+                beta,
+                jac_w_arr,
+                esc_gamma_arr,
+                esc_w_arr,
+                esc_u_thresh_arr,
+                esc_margin_arr,
+            )
+            metrics = jnp.stack([b_loss, b_l_vf, b_l_res, b_l_vf_norm, b_l_res_norm, b_l_res_obj, b_l_jac, b_l_escape])
+            return (dm_next, opt_next), metrics
+
+        (diff_model_out, opt_state_out), all_metrics = jax.lax.scan(scan_step, (diff_m, opt_state), batch_indices_in)
+        mean_metrics = jnp.mean(all_metrics, axis=0)
+        return diff_model_out, static_m, opt_state_out, mean_metrics
+
     for epoch in range(training_params["adam_epochs"]):
         beta = blend_beta(epoch)
         jac_w = jac_weight_at_epoch(epoch)
@@ -953,67 +1000,19 @@ def train_dhnn_model_prelim(
         key, key_train = jax.random.split(key, 2)
         batch_indices = sample_epoch_batch_indices(key_train, epoch)
 
-        epoch_loss = 0.0
-        epoch_l_vf = 0.0
-        epoch_l_res = 0.0
-        epoch_l_vf_norm = 0.0
-        epoch_l_res_norm = 0.0
-        epoch_l_res_obj = 0.0
-        epoch_l_jac = 0.0
-        epoch_l_escape = 0.0
-        for batch_idx in batch_indices:
-            x_train_batch = jnp.take(x_train, batch_idx, axis=0)
-            y_train_batch = jnp.take(y_train, batch_idx, axis=0)
-            y_base_batch = jnp.take(y_base_train, batch_idx, axis=0)
-            batch_bin_idx = jnp.take(train_bin_idx, batch_idx, axis=0)
-            residual_scales_batch = jnp.take(residual_scale_table, batch_bin_idx, axis=0)
-            x_jac_batch = x_train_batch[:jacobian_batch_size]
-            (
-                model,
-                opt_state,
-                batch_loss,
-                batch_l_vf,
-                batch_l_res,
-                batch_l_vf_norm,
-                batch_l_res_norm,
-                batch_l_res_obj,
-                batch_l_jac,
-                batch_l_escape,
-            ) = step(
-                model,
-                opt_state,
-                x_train_batch,
-                y_train_batch,
-                y_base_batch,
-                residual_scales_batch,
-                x_jac_batch,
-                vf_scales,
-                vf_ref,
-                res_ref,
-                beta_arr,
-                jac_w_arr,
-                esc_gamma_arr,
-                esc_w_arr,
-                esc_u_thresh_arr,
-                esc_margin_arr,
-            )
-            epoch_loss += float(batch_loss)
-            epoch_l_vf += float(batch_l_vf)
-            epoch_l_res += float(batch_l_res)
-            epoch_l_vf_norm += float(batch_l_vf_norm)
-            epoch_l_res_norm += float(batch_l_res_norm)
-            epoch_l_res_obj += float(batch_l_res_obj)
-            epoch_l_jac += float(batch_l_jac)
-            epoch_l_escape += float(batch_l_escape)
-
-        loss_value = epoch_loss / num_train_batches
-        train_l_vf = epoch_l_vf / num_train_batches
-        train_l_res = epoch_l_res / num_train_batches
-        train_l_vf_norm = epoch_l_vf_norm / num_train_batches
-        train_l_res_norm = epoch_l_res_norm / num_train_batches
-        train_l_res_obj = epoch_l_res_obj / num_train_batches
-        train_l_jac = epoch_l_jac / num_train_batches
-        train_l_escape = epoch_l_escape / num_train_batches
+        diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
+        diff_model, static_model, opt_state, epoch_metrics = scan_epoch(
+            diff_model, static_model, opt_state, batch_indices, beta_arr, jac_w_arr, esc_gamma_arr, esc_w_arr, esc_u_thresh_arr, esc_margin_arr
+        )
+        model = eqx.combine(diff_model, static_model)
+        loss_value = epoch_metrics[0]
+        train_l_vf = epoch_metrics[1]
+        train_l_res = epoch_metrics[2]
+        train_l_vf_norm = epoch_metrics[3]
+        train_l_res_norm = epoch_metrics[4]
+        train_l_res_obj = epoch_metrics[5]
+        train_l_jac = epoch_metrics[6]
+        train_l_escape = epoch_metrics[7]
 
         y_val_pred = model(x_val)
         delta_val_pred = y_val_pred - y_base_val
@@ -1121,13 +1120,14 @@ def train_blackbox_dhnn_model_prelim(
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
     @eqx.filter_jit
-    def step(model, opt_state, x, y, vf_scales, vf_ref):
+    def step(diff_model, static_model, opt_state, x, y, vf_scales, vf_ref):
         """step
         
         Executes a single optimizer step using raw MSE.
         
         Args:
-            model (eqx.Module): The DHNN model.
+            diff_model (eqx.Module): The active differentiated array components.
+            static_model (eqx.Module): The inactive static python components.
             opt_state: The current Optax state.
             x (jnp.ndarray): Input batch.
             y (jnp.ndarray): Target batch.
@@ -1135,21 +1135,21 @@ def train_blackbox_dhnn_model_prelim(
             vf_ref (jnp.ndarray): Baseline loss reference.
             
         Returns:
-            Tuple containing updated model, updated opt_state, and loss tracking scalar metrics.
+            Tuple containing updated model arrays, updated opt_state, and loss tracking scalar metrics.
         """
         def loss_fn(m):
-            y_pred = m(x)
+            model = eqx.combine(m, static_model)
+            y_pred = model(x)
             l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
             l_vf_norm = l_vf / vf_ref
             return l_vf_norm, (l_vf, l_vf_norm)
 
         (loss_value, (l_vf, l_vf_norm)), grads = eqx.filter_value_and_grad(
             loss_fn, has_aux=True
-        )(model)
-        grads = eqx.filter(grads, eqx.is_array)
-        updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
-        model = eqx.apply_updates(model, updates)
-        return model, opt_state, loss_value, l_vf, l_vf_norm
+        )(diff_model)
+        updates, opt_state = optimizer.update(grads, opt_state, diff_model)
+        diff_model = eqx.apply_updates(diff_model, updates)
+        return diff_model, opt_state, loss_value, l_vf, l_vf_norm
 
     def finite_output_ratio(model, x):
         """finite_output_ratio
@@ -1171,22 +1171,28 @@ def train_blackbox_dhnn_model_prelim(
         perm = jax.random.permutation(key_train, num_train_samples)
         batch_indices = perm[:used_train_samples].reshape((num_train_batches, effective_batch_size))
 
-        epoch_loss = 0.0
-        epoch_l_vf = 0.0
-        epoch_l_vf_norm = 0.0
-        for batch_idx in batch_indices:
+    @eqx.filter_jit
+    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in):
+        def scan_step(carry, batch_idx):
+            dm, opt = carry
             x_batch = jnp.take(x_train, batch_idx, axis=0)
             y_batch = jnp.take(y_train, batch_idx, axis=0)
-            model, opt_state, batch_loss, batch_l_vf, batch_l_vf_norm = step(
-                model, opt_state, x_batch, y_batch, vf_scales, vf_ref
+            dm_next, opt_next, b_loss, b_l_vf, b_l_vf_norm = step(
+                dm, static_model, opt, x_batch, y_batch, vf_scales, vf_ref
             )
-            epoch_loss += float(batch_loss)
-            epoch_l_vf += float(batch_l_vf)
-            epoch_l_vf_norm += float(batch_l_vf_norm)
+            metrics = jnp.stack([b_loss, b_l_vf, b_l_vf_norm])
+            return (dm_next, opt_next), metrics
+        
+        (diff_model_out, opt_state_out), all_metrics = jax.lax.scan(scan_step, (diff_model, opt_state), batch_indices_in)
+        mean_metrics = jnp.mean(all_metrics, axis=0)
+        return diff_model_out, static_model, opt_state_out, mean_metrics
 
-        train_loss = epoch_loss / num_train_batches
-        train_l_vf = epoch_l_vf / num_train_batches
-        train_l_vf_norm = epoch_l_vf_norm / num_train_batches
+        diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
+        diff_model, static_model, opt_state, epoch_metrics = scan_epoch(diff_model, static_model, opt_state, batch_indices)
+        model = eqx.combine(diff_model, static_model)
+        train_loss = epoch_metrics[0]
+        train_l_vf = epoch_metrics[1]
+        train_l_vf_norm = epoch_metrics[2]
 
         y_val_pred = model(x_val)
         val_l_vf = _standardized_vf_loss_from_pred(y_val_pred, y_val, vf_scales, eps)
@@ -1424,7 +1430,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         optax.clip_by_global_norm(1.0),
         optax.adam(learning_rate=lr_schedule),
     )
-    opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
+    opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
     def hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
         """hybrid_loss_terms
@@ -1506,13 +1512,14 @@ def train_hybrid_eob_dhnn_model_prelim(
         return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(model, opt_state, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
+    def step(diff_model, static_model, opt_state, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
         """step
         
         Single optimization step updating model configuration towards multi-objective loss.
         
         Args:
-            model (eqx.Module): EOB Hybrid DHNN to update.
+            diff_model (eqx.Module): The active differentiated array components.
+            static_model (eqx.Module): The inactive static python components.
             opt_state: Optimizer state containing moments.
             x (jnp.ndarray): Input conditions.
             y (jnp.ndarray): True target RHS predictions.
@@ -1529,13 +1536,12 @@ def train_hybrid_eob_dhnn_model_prelim(
         def loss_fn(m):
             return hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn)
 
-        (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
-        grads = eqx.filter(grads, eqx.is_array)
-        updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
-        model = eqx.apply_updates(model, updates)
+        (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(diff_model)
+        updates, opt_state = optimizer.update(grads, opt_state, diff_model)
+        diff_model = eqx.apply_updates(diff_model, updates)
         l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp = aux
         return (
-            model,
+            diff_model,
             opt_state,
             loss_value,
             l_vf,
@@ -1646,6 +1652,33 @@ def train_hybrid_eob_dhnn_model_prelim(
     ema_l_q = 1.0
     ema_alpha = float(training_params.get("ema_alpha", 0.05))
 
+    @eqx.filter_jit
+    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in, q_g, geom_g, w_flux_d, w_omega_d, w_cons_d, w_q_d):
+        def scan_step(carry, batch_idx):
+            dm, opt = carry
+            x_batch = jnp.take(x_train, batch_idx, axis=0)
+            y_batch = jnp.take(y_train, batch_idx, axis=0)
+            (
+                dm_next,
+                opt_next,
+                b_loss,
+                b_l_vf,
+                b_l_vf_norm,
+                b_l_flux,
+                b_l_omega,
+                b_l_cons,
+                b_l_q,
+                b_rel_abs_mean,
+                b_rel_abs_comp,
+            ) = step(dm, static_model, opt, x_batch, y_batch, q_g, geom_g, w_flux_d, w_omega_d, w_cons_d, w_q_d)
+            metrics = jnp.stack([b_loss, b_l_vf, b_l_vf_norm, b_l_flux, b_l_omega, b_l_cons, b_l_q, b_rel_abs_mean])
+            return (dm_next, opt_next), (metrics, b_rel_abs_comp)
+            
+        (diff_model_out, opt_state_out), (all_metrics, all_comp) = jax.lax.scan(scan_step, (diff_model, opt_state), batch_indices_in)
+        mean_metrics = jnp.mean(all_metrics, axis=0)
+        mean_comp = jnp.mean(all_comp, axis=0)
+        return diff_model_out, static_model, opt_state_out, mean_metrics, mean_comp
+
     for epoch in range(int(training_params["adam_epochs"])):
         key, key_train = jax.random.split(key, 2)
         perm = jax.random.permutation(key_train, num_train_samples)
@@ -1689,50 +1722,26 @@ def train_hybrid_eob_dhnn_model_prelim(
         dynamic_w_cons = w_cons_inv * scale_fac
         dynamic_w_q = w_q_inv * scale_fac
 
-        epoch_loss = 0.0
-        epoch_l_vf = 0.0
-        epoch_l_vf_norm = 0.0
-        epoch_l_flux = 0.0
-        epoch_l_omega = 0.0
-        epoch_l_cons = 0.0
-        epoch_l_q = 0.0
-        epoch_rel_abs_mean = 0.0
-        epoch_rel_abs_comp = jnp.zeros((y_train.shape[1],), dtype=y_train.dtype)
-        for batch_idx in batch_indices:
-            x_batch = jnp.take(x_train, batch_idx, axis=0)
-            y_batch = jnp.take(y_train, batch_idx, axis=0)
-            (
-                model,
-                opt_state,
-                batch_loss,
-                batch_l_vf,
-                batch_l_vf_norm,
-                batch_l_flux,
-                batch_l_omega,
-                batch_l_cons,
-                batch_l_q,
-                batch_rel_abs_mean,
-                batch_rel_abs_comp,
-            ) = step(model, opt_state, x_batch, y_batch, q_gain, geom_gain, dynamic_w_flux, dynamic_w_omega, dynamic_w_cons, dynamic_w_q)
-            epoch_loss += float(batch_loss)
-            epoch_l_vf += float(batch_l_vf)
-            epoch_l_vf_norm += float(batch_l_vf_norm)
-            epoch_l_flux += float(batch_l_flux)
-            epoch_l_omega += float(batch_l_omega)
-            epoch_l_cons += float(batch_l_cons)
-            epoch_l_q += float(batch_l_q)
-            epoch_rel_abs_mean += float(batch_rel_abs_mean)
-            epoch_rel_abs_comp += np.asarray(batch_rel_abs_comp)
+        q_gain_arr = jnp.array(q_gain, dtype=x_train.dtype)
+        geom_gain_arr = jnp.array(geom_gain, dtype=x_train.dtype)
+        w_flux_arr = jnp.array(dynamic_w_flux, dtype=x_train.dtype)
+        w_omega_arr = jnp.array(dynamic_w_omega, dtype=x_train.dtype)
+        w_cons_arr = jnp.array(dynamic_w_cons, dtype=x_train.dtype)
+        w_q_arr = jnp.array(dynamic_w_q, dtype=x_train.dtype)
 
-        train_loss = epoch_loss / num_train_batches
-        train_l_vf = epoch_l_vf / num_train_batches
-        train_l_vf_norm = epoch_l_vf_norm / num_train_batches
-        train_l_flux = epoch_l_flux / num_train_batches
-        train_l_omega = epoch_l_omega / num_train_batches
-        train_l_cons = epoch_l_cons / num_train_batches
-        train_l_q = epoch_l_q / num_train_batches
-        train_rel_abs_mean = epoch_rel_abs_mean / num_train_batches
-        train_rel_abs_comp = epoch_rel_abs_comp / num_train_batches
+        diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
+        diff_model, static_model, opt_state, epoch_metrics, train_rel_abs_comp = scan_epoch(
+            diff_model, static_model, opt_state, batch_indices, q_gain_arr, geom_gain_arr, w_flux_arr, w_omega_arr, w_cons_arr, w_q_arr
+        )
+        model = eqx.combine(diff_model, static_model)
+        train_loss = epoch_metrics[0]
+        train_l_vf = epoch_metrics[1]
+        train_l_vf_norm = epoch_metrics[2]
+        train_l_flux = epoch_metrics[3]
+        train_l_omega = epoch_metrics[4]
+        train_l_cons = epoch_metrics[5]
+        train_l_q = epoch_metrics[6]
+        train_rel_abs_mean = epoch_metrics[7]
 
         if train_l_flux > 0:
             ema_l_flux = (1.0 - ema_alpha) * ema_l_flux + ema_alpha * float(train_l_flux)
@@ -1757,22 +1766,23 @@ def train_hybrid_eob_dhnn_model_prelim(
         last_val_l_vf = val_l_vf
 
         # Validation-only threshold metric: compare NN relative error to SEOB perturbation floor.
-        y_val_pred_for_rel = model(x_val)
-        val_rel_matrix = _relative_error_matrix_from_pred(y_val_pred_for_rel, y_val, eps=eps)
-        last_val_rel_summary = _relative_error_summary(val_rel_matrix)
-        if pert_ref_summary is not None:
-            if pert_metric == "p95":
-                denom = max(float(pert_ref_summary["p95"]), eps)
-                numer = float(last_val_rel_summary["p95"])
-                denom_comp = np.maximum(np.asarray(pert_ref_summary["comp_p95"]), eps)
-                numer_comp = np.asarray(last_val_rel_summary["comp_p95"])
-            else:
-                denom = max(float(pert_ref_summary["mean"]), eps)
-                numer = float(last_val_rel_summary["mean"])
-                denom_comp = np.maximum(np.asarray(pert_ref_summary["comp_mean"]), eps)
-                numer_comp = np.asarray(last_val_rel_summary["comp_mean"])
-            last_val_pert_ratio = numer / denom
-            last_val_pert_ratio_comp = numer_comp / denom_comp
+        if (epoch % 10 == 0) or (epoch >= rel_err_min_epochs):
+            y_val_pred_for_rel = model(x_val)
+            val_rel_matrix = _relative_error_matrix_from_pred(y_val_pred_for_rel, y_val, eps=eps)
+            last_val_rel_summary = _relative_error_summary(val_rel_matrix)
+            if pert_ref_summary is not None:
+                if pert_metric == "p95":
+                    denom = max(float(pert_ref_summary["p95"]), eps)
+                    numer = float(last_val_rel_summary["p95"])
+                    denom_comp = np.maximum(np.asarray(pert_ref_summary["comp_p95"]), eps)
+                    numer_comp = np.asarray(last_val_rel_summary["comp_p95"])
+                else:
+                    denom = max(float(pert_ref_summary["mean"]), eps)
+                    numer = float(last_val_rel_summary["mean"])
+                    denom_comp = np.maximum(np.asarray(pert_ref_summary["comp_mean"]), eps)
+                    numer_comp = np.asarray(last_val_rel_summary["comp_mean"])
+                last_val_pert_ratio = numer / denom
+                last_val_pert_ratio_comp = numer_comp / denom_comp
 
         if epoch % 10 == 0:
             val_finite_ratio = finite_output_ratio(model, x_val)
@@ -1854,7 +1864,7 @@ if __name__ == "__main__":
         "lr_end": 3e-6,
         "adam_epochs": 5000,
         "lbfgs_epochs": 5000,
-        "batch_size": 1000,
+        "batch_size": 8192,
         "stage0_epochs": 500,
         "blend_end_epochs": 2000,
         "beta_start": 0.05,

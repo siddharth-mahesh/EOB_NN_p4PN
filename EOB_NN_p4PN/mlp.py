@@ -13,7 +13,7 @@ class MLP(eqx.Module):
     It is a parameterized MLP.
     """
     layers: tuple
-    standalone: bool
+    standalone: bool = eqx.field(static=True)
 
     def __init__(self, key, input_dim, output_dim, hidden_dim, depth=2, standalone=False):
         """initialize_the_mlp.
