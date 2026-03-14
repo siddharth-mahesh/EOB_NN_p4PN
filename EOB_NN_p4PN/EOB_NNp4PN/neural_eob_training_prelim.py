@@ -997,14 +997,14 @@ def train_dhnn_model_prelim(
                 esc_u_thresh_arr,
                 esc_margin_arr,
             )
-            epoch_loss += batch_loss
-            epoch_l_vf += batch_l_vf
-            epoch_l_res += batch_l_res
-            epoch_l_vf_norm += batch_l_vf_norm
-            epoch_l_res_norm += batch_l_res_norm
-            epoch_l_res_obj += batch_l_res_obj
-            epoch_l_jac += batch_l_jac
-            epoch_l_escape += batch_l_escape
+            epoch_loss += float(batch_loss)
+            epoch_l_vf += float(batch_l_vf)
+            epoch_l_res += float(batch_l_res)
+            epoch_l_vf_norm += float(batch_l_vf_norm)
+            epoch_l_res_norm += float(batch_l_res_norm)
+            epoch_l_res_obj += float(batch_l_res_obj)
+            epoch_l_jac += float(batch_l_jac)
+            epoch_l_escape += float(batch_l_escape)
 
         loss_value = epoch_loss / num_train_batches
         train_l_vf = epoch_l_vf / num_train_batches
@@ -1180,9 +1180,9 @@ def train_blackbox_dhnn_model_prelim(
             model, opt_state, batch_loss, batch_l_vf, batch_l_vf_norm = step(
                 model, opt_state, x_batch, y_batch, vf_scales, vf_ref
             )
-            epoch_loss += batch_loss
-            epoch_l_vf += batch_l_vf
-            epoch_l_vf_norm += batch_l_vf_norm
+            epoch_loss += float(batch_loss)
+            epoch_l_vf += float(batch_l_vf)
+            epoch_l_vf_norm += float(batch_l_vf_norm)
 
         train_loss = epoch_loss / num_train_batches
         train_l_vf = epoch_l_vf / num_train_batches
@@ -1714,15 +1714,15 @@ def train_hybrid_eob_dhnn_model_prelim(
                 batch_rel_abs_mean,
                 batch_rel_abs_comp,
             ) = step(model, opt_state, x_batch, y_batch, q_gain, geom_gain, dynamic_w_flux, dynamic_w_omega, dynamic_w_cons, dynamic_w_q)
-            epoch_loss += batch_loss
-            epoch_l_vf += batch_l_vf
-            epoch_l_vf_norm += batch_l_vf_norm
-            epoch_l_flux += batch_l_flux
-            epoch_l_omega += batch_l_omega
-            epoch_l_cons += batch_l_cons
-            epoch_l_q += batch_l_q
-            epoch_rel_abs_mean += batch_rel_abs_mean
-            epoch_rel_abs_comp += batch_rel_abs_comp
+            epoch_loss += float(batch_loss)
+            epoch_l_vf += float(batch_l_vf)
+            epoch_l_vf_norm += float(batch_l_vf_norm)
+            epoch_l_flux += float(batch_l_flux)
+            epoch_l_omega += float(batch_l_omega)
+            epoch_l_cons += float(batch_l_cons)
+            epoch_l_q += float(batch_l_q)
+            epoch_rel_abs_mean += float(batch_rel_abs_mean)
+            epoch_rel_abs_comp += np.asarray(batch_rel_abs_comp)
 
         train_loss = epoch_loss / num_train_batches
         train_l_vf = epoch_l_vf / num_train_batches
@@ -1987,10 +1987,10 @@ if __name__ == "__main__":
             "Use 'blackbox', 'hybrid_eob', 'eob_v1', or 'eob_v2'."
         )
     # load training data
-    x_train = jnp.load("seob_x_train_prelim.npy")
-    y_train = jnp.load("seob_y_train_prelim.npy")
-    x_val = jnp.load("seob_x_val_prelim.npy")
-    y_val = jnp.load("seob_y_val_prelim.npy")
+    x_train = np.load("seob_x_train_prelim.npy")
+    y_train = np.load("seob_y_train_prelim.npy")
+    x_val = np.load("seob_x_val_prelim.npy")
+    y_val = np.load("seob_y_val_prelim.npy")
     val_data = (x_val, y_val)
     val_erel_path = Path("seob_erel_val_prelim.npy")
     if val_erel_path.exists():
