@@ -69,64 +69,23 @@ def vector_field_loss(model, x, y, weights=None):
         squared_error = squared_error * weights
     return jnp.mean(squared_error)
 
-def single_case_PN_rescaled_vector_field_loss(x, y, y_nn):
-    """single_case_PN_rescaled_vector_field_loss
+def relative_vector_field_loss(model, x, y):
+    """relative_vector_field_loss
     
-    Single-sample PN-rescaled squared error.
-
-    Error is divided by `u^8` (`u = 1/r`) to upweight weak-field mismatch where
-    high-PN effects are relatively suppressed.
-    
-    Args:
-        x (jnp.ndarray): A single input sample of shape `(5,)`.
-        y (jnp.ndarray): The target RHS for the single sample of shape `(4,)`.
-        y_nn (jnp.ndarray): The predicted RHS for the single sample of shape `(4,)`.
-        
-    Returns:
-        jnp.ndarray: The PN-rescaled component-wise squared error of shape `(4,)`.
-    """
-    # Guard against division by zero by setting a minimum radius
-    r_safe = jnp.maximum(jnp.abs(x[1]), 1e-12)
-    u = 1.0 / r_safe
-    # Rescale the squared error inversely by u^8 to heavily penalize errors at large separations (weak field)
-    # Keep the component dimension (shape: (4,)) so it can broadcast with weights (shape: (4,))
-    squared_error = jnp.abs(y_nn - y)**2 / (u**8)
-    return squared_error
-
-
-def PN_rescaled_vector_field_loss(model, x, y, weights=None):
-    """PN_rescaled_vector_field_loss
-    
-    Batch PN-rescaled loss with finite-output guard.
-
-    If any model output is non-finite, returns a large fallback value to prevent
-    invalid gradients from corrupting optimizer state.
+    Relative MSE on RHS components.
     
     Args:
         model (eqx.Module): The neural network model predicting RHS.
-        x (jnp.ndarray): Input batch of shape `(N, 5)`.
-        y (jnp.ndarray): Target batch of shape `(N, 4)`.
-        weights (jnp.ndarray, optional): Weights to apply to the squared error.
-
+        x (jnp.ndarray): Input batch of shape `(N, 5)`, typically `[nu, r, phi, p_rstar, p_phi]`.
+        y (jnp.ndarray): Target batch of shape `(N, 4)` for RHS `[dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt]`.
+        
     Returns:
-        jnp.ndarray: The mean standardized vector-field loss, or 1e6 if invalid predictions exist.
+        jnp.ndarray: Mean squared error over the batch and components.
+    )
     """
     y_pred = model(x)
-    finite = jnp.all(jnp.isfinite(y_pred))
-
-    def finite_loss(y_pred_local):
-        # Calculate loss pointwise with `vmap` to respect single-sample definition
-        squared_error = jax.vmap(single_case_PN_rescaled_vector_field_loss, in_axes=(0, 0, 0))(x, y, y_pred_local)
-        if weights is not None:
-            squared_error = squared_error * weights
-        return jnp.mean(squared_error)
-
-    def fallback_loss(_):
-        # Return an arbitrarily large loss if NaNs/infs are present
-        return jnp.array(1e6, dtype=x.dtype)
-
-    return jax.lax.cond(finite, finite_loss, fallback_loss, y_pred)
-
+    squared_error = jnp.abs((y_pred - y)/(jnp.abs(y)+1e-12))**2
+    return jnp.mean(squared_error)
 
 def _component_scales(y, eps=1e-8):
     """_component_scales
@@ -453,60 +412,6 @@ def _standardized_residual_loss_from_delta(delta_pred, delta_true, residual_scal
     """
     err = (delta_pred - delta_true) / (residual_scales + eps)
     return jnp.mean(err**2)
-
-
-def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, tol: float = 1e-14):
-    """_validate_rhs_targets
-    
-    Detect obvious target-layout issues before expensive training starts.
-    
-    Ensures input targets comply with this dataset's explicit structural assumption
-    of [dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt].
-    
-    Args:
-        y (jnp.ndarray): Output targets.
-        split_name (str): Label for errors.
-        strict (bool): Should anomalous datasets trigger an exception or just a warning?
-        tol (float): Tolerance for detecting structural duplicates across columns.
-    """
-    if y.ndim != 2 or y.shape[1] != 4:
-        msg = f"{split_name}: expected RHS shape (N, 4), got {tuple(y.shape)}."
-        raise ValueError(msg)
-
-    duplicate_pairs = []
-    # Exhaustively search for duplicate channels indicating flawed extraction.
-    for i in range(4):
-        for j in range(i + 1, 4):
-            max_abs_diff = jnp.max(jnp.abs(y[:, i] - y[:, j]))
-            if float(max_abs_diff) <= tol:
-                duplicate_pairs.append((i, j))
-
-    # Expect mostly positive dphi/dt if channel 1 is correctly assigned.
-    omega_nonpos_ratio = float(jnp.mean(y[:, 1] <= 0.0))
-    issues = []
-    if duplicate_pairs:
-        issues.append(f"duplicate RHS columns detected: {duplicate_pairs}")
-    if omega_nonpos_ratio > 0.95:
-        issues.append(
-            "column 1 is almost entirely non-positive "
-            f"(non-positive ratio={omega_nonpos_ratio:.3f}); "
-            "expected dphi/dt is usually positive in this trainer's convention"
-        )
-
-    if not issues:
-        return
-
-    msg = (
-        f"{split_name}: potential target-layout anomaly. "
-        + "; ".join(issues)
-        + ". If your dataset uses a different component ordering/sign convention, "
-        "disable strict mode with training_params['strict_target_validation']=False "
-        "and map targets before training."
-    )
-    if strict:
-        raise ValueError(msg)
-    print("WARNING:", msg)
-
 
 def _masked_mean(values: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
     """_masked_mean
@@ -1216,25 +1121,63 @@ def train_hybrid_eob_dhnn_model_prelim(
     model_params: Dict[str, int],
     training_params: Dict[str, Union[int, float]],
 ) -> Hybrid_EOB_DHNN:
-    """Train hybrid EOB-form DHNN with potential-aware RHS channel losses."""
+    """train_hybrid_eob_dhnn_model_prelim
+
+    Train the Hybrid EOB DHNN with multi-objective potential-aware loss.
+
+    Accepts a flat configuration dictionary with the following keys:
+
+    Core training:
+        adam_epochs (int): Number of total training epochs.
+        batch_size (int): Mini-batch size per gradient step.
+        learning_rate (float): Peak Adam learning rate (default 3e-4).
+        warmup_steps (int): LR warm-up steps (default 10% of total steps).
+        loss_eps (float): Denominator regularization floor (default 1e-8).
+        ema_alpha (float): EMA smoothing factor for adaptive weights (default 0.15).
+
+    Curriculum:
+        curriculum_target_vf (float): VF loss threshold to unlock geometry channels (default 1e-3).
+        curriculum_min_epochs (int): Minimum epochs before geometry unlock (default 50).
+        curriculum_max_epochs (int): Maximum epochs before forcing geometry unlock (default 400).
+        curriculum_ramp_epochs (int): Epochs to ramp geometry + Q gains from 0 to 1 (default 100).
+
+    pr-channel masking (always adaptive):
+        qc_frac (float): Quantile defining quasi-circular pr threshold (default 0.15).
+        q_frac (float): Quantile defining non-circular pr lower bound (default 0.80).
+
+    Static loss weights (multiplied by EMA-dynamic inverse):
+        w_flux (float): Flux channel weight (default 1.0).
+        w_omega (float): Omega channel weight (default 1.0).
+        w_cons (float): Conservative channel weight (default 1.0).
+        w_q (float): Q channel weight (default 0.5).
+
+    Perturbation-ratio monitoring:
+        pert_alpha (float): Target Val/pert p95 ratio (default 10.0).
+        stop_on_pert_ratio (bool): Stop training when ratio <= pert_alpha (default False).
+        pert_min_epochs (int): Minimum epochs before pert-ratio stopping is active (default 100).
+
+    Weight I/O:
+        load_weights_path (str): Path to load weights from (default empty = skip).
+        save_weights_path (str): Path to save weights to (default 'hybrid_eob_weights.eqx').
+
+    Diagnostics:
+        log_r_binned_val (bool): Log per-r-bin validation breakdown every 10 epochs (default True).
+    """
 
     model_class = model_params.get("model_class", Hybrid_EOB_DHNN)
     model_kwargs = {k: v for k, v in model_params.items() if k != "model_class"}
     key = model_kwargs["key"]
     model = model_class(**model_kwargs)
     load_weights_path = str(training_params.get("load_weights_path", "")).strip()
-    load_weights_strict = bool(training_params.get("load_weights_strict", True))
-    save_weights_path = str(training_params.get("save_weights_path", "")).strip()
+    save_weights_path = str(training_params.get("save_weights_path", "hybrid_eob_weights.eqx")).strip()
     if load_weights_path:
-        model = load_model_weights(model, load_weights_path, strict=load_weights_strict)
+        model = load_model_weights(model, load_weights_path, strict=True)
 
     x_train, y_train, _ = _split_supervision_data(train_data, "train")
     x_val, y_val, e_rel_val_ref = _split_supervision_data(val_data, "val")
     batch_size = int(training_params["batch_size"])
-    strict_target_validation = bool(training_params.get("strict_target_validation", True))
-
-    _validate_rhs_targets(y_train, "train", strict=strict_target_validation)
-    _validate_rhs_targets(y_val, "val", strict=strict_target_validation)
+    _validate_rhs_targets(y_train, "train", strict=True)
+    _validate_rhs_targets(y_val, "val", strict=True)
 
     num_train_samples = x_train.shape[0]
     effective_batch_size = min(batch_size, num_train_samples)
@@ -1243,8 +1186,8 @@ def train_hybrid_eob_dhnn_model_prelim(
     dropped_train_samples = num_train_samples - used_train_samples
 
     lr_peak = float(training_params.get("learning_rate", 3e-4))
-    lr_init = float(training_params.get("lr_init", 0.1 * lr_peak))
-    lr_end = float(training_params.get("lr_end", 0.01 * lr_peak))
+    lr_init = 0.1 * lr_peak
+    lr_end = 0.01 * lr_peak
     total_steps = int(training_params["adam_epochs"]) * num_train_batches
     warmup_steps_requested = int(training_params.get("warmup_steps", int(0.1 * total_steps)))
     warmup_steps = min(max(0, warmup_steps_requested), max(0, total_steps - 1))
@@ -1291,90 +1234,73 @@ def train_hybrid_eob_dhnn_model_prelim(
     dr_over_pr_train = y_train[:, 0] / p_r_train_safe
     q_scale = jnp.maximum(jnp.std(dr_over_pr_train), eps)
 
-    w_vf = float(training_params.get("hybrid_w_vf", 1.0))
-    w_flux = float(training_params.get("hybrid_w_flux", 1.0))
-    w_omega = float(training_params.get("hybrid_w_omega", 1.0))
-    w_cons = float(training_params.get("hybrid_w_cons", 1.0))
-    w_q = float(training_params.get("hybrid_w_q", 0.5))
-    use_adaptive_pr_masks = bool(training_params.get("hybrid_use_adaptive_pr_masks", True))
-    qc_frac_target = float(training_params.get("hybrid_qc_frac_target", 0.15))
-    q_frac_target = float(training_params.get("hybrid_q_frac_target", 0.80))
-    qc_frac_target = min(max(qc_frac_target, 1e-4), 0.5)
-    q_frac_target = min(max(q_frac_target, qc_frac_target + 1e-4), 0.999)
-    if use_adaptive_pr_masks:
-        abs_pr_train_np = np.asarray(jnp.abs(x_train[:, 3]))
-        pr_qc_threshold = float(np.quantile(abs_pr_train_np, qc_frac_target))
-        pr_q_threshold = float(np.quantile(abs_pr_train_np, q_frac_target))
-    else:
-        pr_qc_threshold = float(training_params.get("hybrid_pr_qc_threshold", 2e-3))
-        pr_q_threshold = float(training_params.get("hybrid_pr_q_threshold", 8e-3))
-    pr_qc_threshold = max(pr_qc_threshold, float(eps))
-    pr_q_threshold = max(pr_q_threshold, pr_qc_threshold + float(eps))
-    q_start_epoch = int(training_params.get("hybrid_q_start_epoch", 200))
-    q_ramp_epochs = max(1, int(training_params.get("hybrid_q_ramp_epochs", 200)))
-    vf_only_min_epochs = int(training_params.get("hybrid_vf_only_min_epochs", 50))
-    vf_only_max_epochs = int(training_params.get("hybrid_vf_only_max_epochs", 400))
-    vf_only_target_vf = float(training_params.get("hybrid_vf_only_target_vf", 0.25))
-    geom_ramp_epochs = max(1, int(training_params.get("hybrid_geom_ramp_epochs", 100)))
-    stop_on_rel_err = bool(training_params.get("hybrid_stop_on_rel_err", False))
-    rel_err_target = float(training_params.get("hybrid_rel_err_target", 1e-3))
-    rel_err_min_epochs = int(training_params.get("hybrid_rel_err_min_epochs", 100))
-    use_val_erel_threshold = bool(training_params.get("hybrid_use_val_erel_threshold", True))
-    stop_on_pert_ratio = bool(training_params.get("hybrid_stop_on_pert_ratio", False))
-    pert_alpha = float(training_params.get("hybrid_pert_alpha", 10.0))
-    pert_metric = str(training_params.get("hybrid_pert_metric", "p95")).lower()
-    if pert_metric not in {"mean", "p95"}:
-        pert_metric = "p95"
-    pert_componentwise = bool(training_params.get("hybrid_pert_componentwise", False))
-    pert_min_epochs = int(training_params.get("hybrid_pert_min_epochs", rel_err_min_epochs))
-    num_r_bins = max(1, int(training_params.get("hybrid_num_r_bins", 8)))
-    r_bins_mode = str(training_params.get("hybrid_r_bins_mode", "linear")).lower()
-    log_r_binned_val = bool(training_params.get("hybrid_log_r_binned_val", True))
-    r_binned_top_k = max(1, int(training_params.get("hybrid_r_binned_top_k", 2)))
-    r_binned_sort_key = str(training_params.get("hybrid_r_binned_sort_key", "cons")).lower()
-    valid_bin_sort_keys = {"vf", "flux", "omega", "cons", "q"}
-    if r_binned_sort_key not in valid_bin_sort_keys:
-        r_binned_sort_key = "cons"
+    # --- Static channel weights (multiplied on top of EMA dynamic inverse)
+    w_vf = float(training_params.get("w_vf", 1.0))
+    w_flux = float(training_params.get("w_flux", 1.0))
+    w_omega = float(training_params.get("w_omega", 1.0))
+    w_cons = float(training_params.get("w_cons", 1.0))
+    w_q = float(training_params.get("w_q", 0.5))
 
-    print("HybridEOB VF scales:", vf_scales)
-    print("HybridEOB VF anchor:", vf_ref)
+    # --- Adaptive pr-mask thresholds (always derived from training data quantiles)
+    qc_frac = min(max(float(training_params.get("qc_frac", 0.15)), 1e-4), 0.5)
+    q_frac = min(max(float(training_params.get("q_frac", 0.80)), qc_frac + 1e-4), 0.999)
+    abs_pr_train_np = np.asarray(jnp.abs(x_train[:, 3]))
+    pr_qc_threshold = max(float(np.quantile(abs_pr_train_np, qc_frac)), float(eps))
+    pr_q_threshold = max(float(np.quantile(abs_pr_train_np, q_frac)), pr_qc_threshold + float(eps))
+
+    # --- Curriculum: geometry + Q channels unlock after VF converges
+    curriculum_target_vf = float(training_params.get("curriculum_target_vf", 1e-3))
+    curriculum_min_epochs = int(training_params.get("curriculum_min_epochs", 50))
+    curriculum_max_epochs = int(training_params.get("curriculum_max_epochs", 400))
+    curriculum_ramp_epochs = max(1, int(training_params.get("curriculum_ramp_epochs", 100)))
+    # Q gain ramps together with geometry gain after unlock
+    vf_only_min_epochs = curriculum_min_epochs
+    vf_only_max_epochs = curriculum_max_epochs
+    vf_only_target_vf = curriculum_target_vf
+    geom_ramp_epochs = curriculum_ramp_epochs
+    q_start_epoch = curriculum_max_epochs  # Q unlocks at geometry unlock point at latest
+    q_ramp_epochs = curriculum_ramp_epochs
+
+    # --- Perturbation-ratio monitoring
+    use_val_erel_threshold = True
+    stop_on_pert_ratio = bool(training_params.get("stop_on_pert_ratio", False))
+    pert_alpha = float(training_params.get("pert_alpha", 10.0))
+    pert_metric = "p95"
+    pert_componentwise = False
+    pert_min_epochs = int(training_params.get("pert_min_epochs", 100))
+
+    # --- Diagnostics: r-binned validation breakdown
+    log_r_binned_val = bool(training_params.get("log_r_binned_val", True))
+    num_r_bins = 8
+    r_bins_mode = "linear"
+    r_binned_top_k = 2
+    r_binned_sort_key = "cons"
+
+    # --- No relative-error early stopping (deprecated path)
+    stop_on_rel_err = False
+    rel_err_target = 1e-9
+    rel_err_min_epochs = pert_min_epochs
+
     train_abs_pr = jnp.abs(x_train[:, 3])
     train_qc_frac = jnp.mean(train_abs_pr <= pr_qc_threshold)
     train_q_frac = jnp.mean(train_abs_pr > pr_q_threshold)
     print(
-        "HybridEOB channel scales:",
+        "HybridEOB config:",
         {
-            "cons_scale": cons_scale,
-            "q_scale": q_scale,
+            "vf_scales": vf_scales.tolist() if hasattr(vf_scales, "tolist") else vf_scales,
+            "vf_ref": float(vf_ref),
+            "cons_scale": float(cons_scale),
+            "q_scale": float(q_scale),
             "pr_qc_threshold": pr_qc_threshold,
             "pr_q_threshold": pr_q_threshold,
-            "train_qc_frac": train_qc_frac,
-            "train_q_frac": train_q_frac,
-            "adaptive_pr_masks": use_adaptive_pr_masks,
-        },
-    )
-    print(
-        "HybridEOB loss weights:",
-        {
-            "w_vf": w_vf,
-            "w_flux": w_flux,
-            "w_omega": w_omega,
-            "w_cons": w_cons,
-            "w_q": w_q,
-            "q_start_epoch": q_start_epoch,
-            "q_ramp_epochs": q_ramp_epochs,
-            "vf_only_min_epochs": vf_only_min_epochs,
-            "vf_only_max_epochs": vf_only_max_epochs,
-            "vf_only_target_vf": vf_only_target_vf,
-            "geom_ramp_epochs": geom_ramp_epochs,
-            "stop_on_rel_err": stop_on_rel_err,
-            "rel_err_target": rel_err_target,
-            "rel_err_min_epochs": rel_err_min_epochs,
-            "use_val_erel_threshold": use_val_erel_threshold,
-            "stop_on_pert_ratio": stop_on_pert_ratio,
-            "pert_alpha": pert_alpha,
-            "pert_metric": pert_metric,
-            "pert_componentwise": pert_componentwise,
+            "train_qc_frac": float(train_qc_frac),
+            "train_q_frac": float(train_q_frac),
+            "w_vf": w_vf, "w_flux": w_flux, "w_omega": w_omega,
+            "w_cons": w_cons, "w_q": w_q,
+            "curriculum_target_vf": vf_only_target_vf,
+            "curriculum_min/max_epochs": (vf_only_min_epochs, vf_only_max_epochs),
+            "curriculum_ramp_epochs": geom_ramp_epochs,
+            "pert_alpha": pert_alpha, "stop_on_pert_ratio": stop_on_pert_ratio,
             "pert_min_epochs": pert_min_epochs,
         },
     )
@@ -1458,9 +1384,11 @@ def train_hybrid_eob_dhnn_model_prelim(
         Returns:
             Tuple containing total combined loss and auxiliary unpackable individual losses.
         """
+        #l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
+        #l_vf_norm = l_vf / vf_ref
+        l_vf = relative_vector_field_loss(m, x, y)
+        l_vf_norm = l_vf
         y_pred = m(x)
-        l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
-        l_vf_norm = l_vf / vf_ref
         rel_abs_mean, rel_abs_comp = _componentwise_relative_error_metrics_from_pred(y_pred, y, eps=eps)
 
         flux_true = y[:, 3]
@@ -1507,7 +1435,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             + geom_gain * w_flux * w_flux_dyn * l_flux
             + geom_gain * w_omega * w_omega_dyn * l_omega
             + geom_gain * w_cons * w_cons_dyn * l_cons
-            + w_q * w_q_dyn * l_q
+            + geom_gain * w_q * w_q_dyn * l_q
         )
         return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp)
 
@@ -1650,7 +1578,7 @@ def train_hybrid_eob_dhnn_model_prelim(
     ema_l_omega = 1.0
     ema_l_cons = 1.0
     ema_l_q = 1.0
-    ema_alpha = float(training_params.get("ema_alpha", 0.05))
+    ema_alpha = float(training_params.get("ema_alpha", 0.15))
 
     @eqx.filter_jit
     def scan_epoch(diff_model, static_model, opt_state, batch_indices_in, q_g, geom_g, w_flux_d, w_omega_d, w_cons_d, w_q_d):
@@ -1859,67 +1787,36 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(seed)
     training_params = {
         "experiment": "hybrid_eob",
+        # -- Core --
         "learning_rate": 3e-4,
-        "lr_init": 3e-5,
-        "lr_end": 3e-6,
         "adam_epochs": 5000,
-        "lbfgs_epochs": 5000,
         "batch_size": 8192,
-        "stage0_epochs": 500,
-        "blend_end_epochs": 2000,
-        "beta_start": 0.05,
         "warmup_steps": 2000,
-        "jacobian_start_epoch": 600,
-        "jacobian_ramp_epochs": 300,
-        "jacobian_weight": 1e-5,
-        "jacobian_batch_size": 16,
-        "num_u_bins": 8,
-        "min_bin_count": 32,
-        "residual_scale_floor_frac": 0.1,
-        "escape_epochs": 80,
-        "escape_gamma_start": 1.2,
-        "escape_gamma_end": 1.0,
-        "escape_weight": 0.0,
-        "escape_margin": 0.1,
-        "escape_u_threshold": 0.12,
-        "escape_high_u_frac": 0.1,
-        "escape_top_bins": 1,
         "loss_eps": 1e-8,
-        "strict_target_validation": True,
-        "load_weights_path": "",
-        "load_weights_strict": True,
-        "save_weights_path": "hybrid_eob_weights.eqx",
-        "hybrid_w_vf": 1.0,
-        "hybrid_w_flux": 1.0,
-        "hybrid_w_omega": 1.0,
-        "hybrid_w_cons": 1.0,
-        "hybrid_w_q": 0.5,
-        "hybrid_use_adaptive_pr_masks": True,
-        "hybrid_qc_frac_target": 0.15,
-        "hybrid_q_frac_target": 0.80,
-        "hybrid_pr_qc_threshold": 2e-3,
-        "hybrid_pr_q_threshold": 8e-3,
-        "hybrid_q_start_epoch": 200,
-        "hybrid_q_ramp_epochs": 200,
-        "hybrid_vf_only_min_epochs": 50,
-        "hybrid_vf_only_max_epochs": 400,
-        "hybrid_vf_only_target_vf": 1e-3,
-        "hybrid_geom_ramp_epochs": 100,
-        "hybrid_stop_on_rel_err": False,
-        "hybrid_rel_err_target": 1e-9,
-        "hybrid_rel_err_min_epochs": 100,
-        "hybrid_use_val_erel_threshold": True,
-        "hybrid_stop_on_pert_ratio": True,
-        "hybrid_pert_alpha": 10.0,
-        "hybrid_pert_metric": "p95",
-        "hybrid_pert_componentwise": False,
-        "hybrid_pert_min_epochs": 100,
-        "hybrid_num_r_bins": 8,
-        "hybrid_r_bins_mode": "linear",
-        "hybrid_log_r_binned_val": True,
-        "hybrid_r_binned_top_k": 2,
-        "hybrid_r_binned_sort_key": "cons",
         "ema_alpha": 0.15,
+        # -- Weight I/O --
+        "load_weights_path": "",
+        "save_weights_path": "hybrid_eob_weights.eqx",
+        # -- Static channel weights --
+        "w_vf": 1.0,
+        "w_flux": 1.0,
+        "w_omega": 1.0,
+        "w_cons": 1.0,
+        "w_q": 0.5,
+        # -- Curriculum --
+        "curriculum_target_vf": 1e-3,
+        "curriculum_min_epochs": 50,
+        "curriculum_max_epochs": 400,
+        "curriculum_ramp_epochs": 100,
+        # -- pr-mask quantiles --
+        "qc_frac": 0.15,
+        "q_frac": 0.80,
+        # -- Pert-ratio monitoring --
+        "stop_on_pert_ratio": True,
+        "pert_alpha": 10.0,
+        "pert_min_epochs": 100,
+        # -- Diagnostics --
+        "log_r_binned_val": True,
     }
     experiment = str(training_params.get("experiment", "blackbox")).lower()
     if experiment == "blackbox":

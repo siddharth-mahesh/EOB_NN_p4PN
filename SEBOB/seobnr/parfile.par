@@ -6,6 +6,6 @@
 chi1 = 0.                   # (REAL)
 chi2 = 0.                  # (REAL)
 dt = 2.4627455127717882e-05  # (REAL)
-initial_omega = 0.028130575122258535      # (REAL)
-mass_ratio = 1.4090804352479782               # (REAL)
+initial_omega = 0.024389259119018736      # (REAL)
+mass_ratio = 3.907143525394827               # (REAL)
 total_mass = 50              # (REAL)

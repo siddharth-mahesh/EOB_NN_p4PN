@@ -1,0 +1,186 @@
+Sample 0
+Sample 0 (idx 55) Forward Loss: 0.4990813806292753
+Sample 0 (idx 55) Backward: Valid (Norm: 4.196365612541416)
+Sample 1
+Sample 1 (idx 16) Forward Loss: 0.32418444437282357
+Sample 1 (idx 16) Backward: Valid (Norm: 3.910263081160466)
+Sample 2
+Sample 2 (idx 36) Forward Loss: 0.025272108386918957
+Sample 2 (idx 36) Backward: Valid (Norm: 0.08681644252390254)
+Sample 3
+Sample 3 (idx 41) Forward Loss: 0.06055803621492384
+Sample 3 (idx 41) Backward: Valid (Norm: 0.5936082470276642)
+Sample 4
+Sample 4 (idx 10) Forward Loss: 0.4367654857845723
+Sample 4 (idx 10) Backward: Valid (Norm: 4.179688799463628)
+Sample 5
+Sample 5 (idx 51) Forward Loss: 0.02932266673846562
+Sample 5 (idx 51) Backward: Valid (Norm: 0.8527922512214329)
+Sample 6
+Sample 6 (idx 25) Forward Loss: 0.4357668295244793
+Sample 6 (idx 25) Backward: Valid (Norm: 4.18094023032049)
+Sample 7
+Sample 7 (idx 0) Forward Loss: 0.1546070365014912
+Sample 7 (idx 0) Backward: Valid (Norm: 0.9687148594644777)
+Sample 8
+Sample 8 (idx 8) Forward Loss: 0.25761609980694733
+Sample 8 (idx 8) Backward: Valid (Norm: 3.5902894994648467)
+Sample 9
+Sample 9 (idx 2) Forward Loss: 0.0655462233056956
+Sample 9 (idx 2) Backward: Valid (Norm: 0.6335346338102914)
+Sample 10
+Sample 10 (idx 11) Forward Loss: 0.13305805030585793
+Sample 10 (idx 11) Backward: Valid (Norm: 0.9417329478481123)
+Sample 11
+Sample 11 (idx 26) Forward Loss: 0.022917491561069148
+Sample 11 (idx 26) Backward: Valid (Norm: 0.42166016282633567)
+Sample 12
+Sample 12 (idx 4) Forward Loss: 0.0471470776972982
+Sample 12 (idx 4) Backward: Valid (Norm: 0.439336785459885)
+Sample 13
+Sample 13 (idx 54) Forward Loss: 0.09202179760429718
+Sample 13 (idx 54) Backward: Valid (Norm: 0.7964019086522742)
+Sample 14
+Sample 14 (idx 43) Forward Loss: 0.09449422895073434
+Sample 14 (idx 43) Backward: Valid (Norm: 0.823211196713331)
+Sample 15
+Sample 15 (idx 33) Forward Loss: 0.08375567594099775
+Sample 15 (idx 33) Backward: Valid (Norm: 1.9998427170344926)
+Sample 16
+Sample 16 (idx 34) Forward Loss: 0.02842199256092437
+Sample 16 (idx 34) Backward: Valid (Norm: 0.8272875837733144)
+Sample 17
+Sample 17 (idx 37) Forward Loss: 0.02266114839610789
+Sample 17 (idx 37) Backward: Valid (Norm: 0.40708720363599193)
+Sample 18
+Sample 18 (idx 39) Forward Loss: 0.03334761081836002
+Sample 18 (idx 39) Backward: Valid (Norm: 0.2041009188270268)
+Sample 19
+Sample 19 (idx 38) Forward Loss: 0.045560659652195246
+Sample 19 (idx 38) Backward: Valid (Norm: 0.4235863144262484)
+Sample 20
+Sample 20 (idx 52) Forward Loss: 0.49984475048119104
+Sample 20 (idx 52) Backward: Valid (Norm: 4.192958409342461)
+Sample 21
+Sample 21 (idx 1) Forward Loss: 0.10036774115961211
+Sample 21 (idx 1) Backward: Valid (Norm: 0.833987710319234)
+Sample 22
+Sample 22 (idx 32) Forward Loss: 0.2604830477580129
+Sample 22 (idx 32) Backward: Valid (Norm: 0.9861141727901059)
+Sample 23
+Sample 23 (idx 59) Forward Loss: 0.49909384483838704
+Sample 23 (idx 59) Backward: Valid (Norm: 4.197084511304998)
+Sample 24
+Sample 24 (idx 21) Forward Loss: 0.032876285528003035
+Sample 24 (idx 21) Backward: Valid (Norm: 0.19906820048643223)
+Sample 25
+Sample 25 (idx 42) Forward Loss: 0.11209144971476337
+Sample 25 (idx 42) Backward: Valid (Norm: 0.8966101468424809)
+Sample 26
+Sample 26 (idx 7) Forward Loss: 0.11684965890606369
+Sample 26 (idx 7) Backward: Valid (Norm: 0.9016298088894654)
+Sample 27
+Sample 27 (idx 19) Forward Loss: 0.13887398214816338
+Sample 27 (idx 19) Backward: Valid (Norm: 2.673117130980324)
+Sample 28
+Sample 28 (idx 22) Forward Loss: 0.14269597167998538
+Sample 28 (idx 22) Backward: Valid (Norm: 2.698990062987526)
+Sample 29
+Sample 29 (idx 45) Forward Loss: 0.12679585933238902
+Sample 29 (idx 45) Backward: Valid (Norm: 0.9292574293409588)
+Sample 30
+Sample 30 (idx 47) Forward Loss: 0.3258264068494191
+Sample 30 (idx 47) Backward: Valid (Norm: 3.912422318551507)
+Sample 31
+Sample 31 (idx 29) Forward Loss: 0.49917919260666777
+Sample 31 (idx 29) Backward: Valid (Norm: 4.195799407236608)
+Sample 32
+Sample 32 (idx 31) Forward Loss: 0.28224333027040727
+Sample 32 (idx 31) Backward: Valid (Norm: 0.9647692749343232)
+Sample 33
+Sample 33 (idx 13) Forward Loss: 0.49786847199631046
+Sample 33 (idx 13) Backward: Valid (Norm: 4.200933090863033)
+Sample 34
+Sample 34 (idx 17) Forward Loss: 0.32324425089202435
+Sample 34 (idx 17) Backward: Valid (Norm: 3.9096172293657014)
+Sample 35
+Sample 35 (idx 14) Forward Loss: 0.4981152570105083
+Sample 35 (idx 14) Backward: Valid (Norm: 4.199745693784576)
+Sample 36
+Sample 36 (idx 15) Forward Loss: 0.49811314304406507
+Sample 36 (idx 15) Backward: Valid (Norm: 4.199689381819087)
+Sample 37
+Sample 37 (idx 9) Forward Loss: 0.49905098602198117
+Sample 37 (idx 9) Backward: Valid (Norm: 4.1967106625496395)
+Sample 38
+Sample 38 (idx 30) Forward Loss: 0.49921621889939216
+Sample 38 (idx 30) Backward: Valid (Norm: 4.195713291526028)
+Sample 39
+Sample 39 (idx 48) Forward Loss: 0.13931439136523172
+Sample 39 (idx 48) Backward: Valid (Norm: 2.6761573167185495)
+Sample 40
+Sample 40 (idx 27) Forward Loss: 0.49921392242692775
+Sample 40 (idx 27) Backward: Valid (Norm: 4.195693355202783)
+Sample 41
+Sample 41 (idx 23) Forward Loss: 0.49925966088996465
+Sample 41 (idx 23) Backward: Valid (Norm: 4.195595930604754)
+Sample 42
+Sample 42 (idx 44) Forward Loss: 0.1405543538559758
+Sample 42 (idx 44) Backward: Valid (Norm: 0.9452994302153238)
+Sample 43
+Sample 43 (idx 5) Forward Loss: 0.08400532924301884
+Sample 43 (idx 5) Backward: Valid (Norm: 0.7551625647518463)
+Sample 44
+Sample 44 (idx 53) Forward Loss: 0.02326548588842048
+Sample 44 (idx 53) Backward: Valid (Norm: 0.44166327615467765)
+Sample 45
+Sample 45 (idx 50) Forward Loss: 0.0935867618161329
+Sample 45 (idx 50) Backward: Valid (Norm: 0.8110333984691492)
+Sample 46
+Sample 46 (idx 58) Forward Loss: 0.500038153279656
+Sample 46 (idx 58) Backward: Valid (Norm: 4.1949163977330945)
+Sample 47
+Sample 47 (idx 56) Forward Loss: 0.0332701086424827
+Sample 47 (idx 56) Backward: Valid (Norm: 0.20105981039954912)
+Sample 48
+Sample 48 (idx 18) Forward Loss: 0.13866108614988193
+Sample 48 (idx 18) Backward: Valid (Norm: 2.6716977865009235)
+Sample 49
+Sample 49 (idx 3) Forward Loss: 0.13096729428817178
+Sample 49 (idx 3) Backward: Valid (Norm: 0.9388588099177521)
+Sample 50
+Sample 50 (idx 28) Forward Loss: 0.4992358550016085
+Sample 50 (idx 28) Backward: Valid (Norm: 4.195658990640997)
+Sample 51
+Sample 51 (idx 6) Forward Loss: 0.4860704380483848
+Sample 51 (idx 6) Backward: Valid (Norm: 4.200528640286643)
+Sample 52
+Sample 52 (idx 60) Forward Loss: 0.43584665298801173
+Sample 52 (idx 60) Backward: Valid (Norm: 4.180703758763474)
+Sample 53
+Sample 53 (idx 57) Forward Loss: 0.048132193664254586
+Sample 53 (idx 57) Backward: Valid (Norm: 1.3796549063955037)
+Sample 54
+Sample 54 (idx 20) Forward Loss: 0.047684224944061326
+Sample 54 (idx 20) Backward: Valid (Norm: 1.3712664213010743)
+Sample 55
+Sample 55 (idx 24) Forward Loss: 0.4995045985930965
+Sample 55 (idx 24) Backward: Valid (Norm: 4.193997103891463)
+Sample 56
+Sample 56 (idx 12) Forward Loss: 0.5196705923920011
+Sample 56 (idx 12) Backward: Valid (Norm: 4.087841141994889)
+Sample 57
+Sample 57 (idx 35) Forward Loss: 0.04820454405335839
+Sample 57 (idx 35) Backward: Valid (Norm: 1.3783498076014133)
+Sample 58
+Sample 58 (idx 40) Forward Loss: 0.07602306347521604
+Sample 58 (idx 40) Backward: Valid (Norm: 0.7019040463775089)
+Sample 59
+Sample 59 (idx 46) Forward Loss: 0.49926856603665026
+Sample 59 (idx 46) Backward: Valid (Norm: 4.195668520182942)
+Sample 60
+Sample 60 (idx 49) Forward Loss: 0.047792892368971884
+Sample 60 (idx 49) Backward: Valid (Norm: 1.373095642930738)
+Sample 61
+Sample 61 (idx 61) Forward Loss: 0.4985732053291916
+Sample 61 (idx 61) Backward: Valid (Norm: 4.198057889025748)
