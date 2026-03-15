@@ -1919,6 +1919,7 @@ if __name__ == "__main__":
         "hybrid_log_r_binned_val": True,
         "hybrid_r_binned_top_k": 2,
         "hybrid_r_binned_sort_key": "cons",
+        "ema_alpha": 0.15,
     }
     experiment = str(training_params.get("experiment", "blackbox")).lower()
     if experiment == "blackbox":
@@ -1933,10 +1934,13 @@ if __name__ == "__main__":
         model_params = {
             "key": key,
             "model_class": Hybrid_EOB_DHNN,
-            "hidden_dim_A": 256,
-            "hidden_dim_D": 256,
-            "hidden_dim_Q": 256,
-            "hidden_dim_f": 256,
+            "hidden_dim_A": 32,
+            "hidden_dim_D": 32,
+            "hidden_dim_Q": 32,
+            "hidden_dim_f": 32,
+            "depth_A": 4,
+            "depth_D": 4,
+            "depth_Q": 4, "depth_f": 4,
             "output_init_scale_A": 1e-3,
             "output_init_scale_D": 1e-3,
             "output_init_scale_Q": 1e-3,
