@@ -220,6 +220,58 @@ def _standardized_vf_loss_from_pred(y_pred, y_true, vf_scales, eps=1e-8):
     return jnp.mean(err**2)
 
 
+def _validate_rhs_targets(y: jnp.ndarray, split_name: str, strict: bool = True, tol: float = 1e-14):
+    """_validate_rhs_targets
+    
+    Detect obvious target-layout issues before expensive training starts.
+    
+    Ensures input targets comply with this dataset's explicit structural assumption
+    of [dr/dt, dphi/dt, dp_rstar/dt, dp_phi/dt].
+    
+    Args:
+        y (jnp.ndarray): Output targets.
+        split_name (str): Label for errors.
+        strict (bool): Should anomalous datasets trigger an exception or just a warning?
+        tol (float): Tolerance for detecting structural duplicates across columns.
+    """
+    if y.ndim != 2 or y.shape[1] != 4:
+        msg = f"{split_name}: expected RHS shape (N, 4), got {tuple(y.shape)}."
+        raise ValueError(msg)
+
+    duplicate_pairs = []
+    # Exhaustively search for duplicate channels indicating flawed extraction.
+    for i in range(4):
+        for j in range(i + 1, 4):
+            max_abs_diff = jnp.max(jnp.abs(y[:, i] - y[:, j]))
+            if float(max_abs_diff) <= tol:
+                duplicate_pairs.append((i, j))
+
+    # Expect mostly positive dphi/dt if channel 1 is correctly assigned.
+    omega_nonpos_ratio = float(jnp.mean(y[:, 1] <= 0.0))
+    issues = []
+    if duplicate_pairs:
+        issues.append(f"duplicate RHS columns detected: {duplicate_pairs}")
+    if omega_nonpos_ratio > 0.95:
+        issues.append(
+            "column 1 is almost entirely non-positive "
+            f"(non-positive ratio={omega_nonpos_ratio:.3f}); "
+            "expected dphi/dt is usually positive in this trainer's convention"
+        )
+
+    if not issues:
+        return
+
+    msg = (
+        f"{split_name}: potential target-layout anomaly. "
+        + "; ".join(issues)
+        + ". If your dataset uses a different component ordering/sign convention, "
+        "disable strict mode with training_params['strict_target_validation']=False "
+        "and map targets before training."
+    )
+    if strict:
+        raise ValueError(msg)
+    print("WARNING:", msg)
+
 def _componentwise_relative_error_metrics_from_pred(y_pred, y_true, eps=1e-12):
     """_componentwise_relative_error_metrics_from_pred
     
