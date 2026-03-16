@@ -1410,42 +1410,38 @@ def train_hybrid_eob_dhnn_model_prelim(
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
-    def hybrid_loss_terms(m, x, y, geom_gain):
+    def hybrid_loss_terms(m, x, y, omega_gain, flux_gain, cons_gain, q_gain):
         """hybrid_loss_terms
         
         Evaluate the multi-objective loss for the Hybrid EOB model.
         
-        Evaluates the standard vector field loss, alongside component-specific structural
-        losses including:
-        - Geometric energy flux matching (`l_flux`)
-        - Angular momentum flow (`l_omega`) 
-        - Conservative flow (`l_cons`)
-        - Strong field potential mappings (`l_q`)
+        Each geometric loss term has its own gain scalar so that they can be
+        activated sequentially as the vector field loss converges:
+        - l_omega (A potential via QC dispersion) activates first
+        - l_flux (f network, needs correct omega input) unlocks after omega converges
+        - l_cons (conservative flow in radial sector) unlocks with flux
+        - l_q (strong-field D/Q sector) unlocks last
         
         Args:
             m (eqx.Module): Evaluated Model.
             x (jnp.ndarray): Input batch.
             y (jnp.ndarray): Target RHS.
-            geom_gain (float): Ramp weight applied to geometry component matching terms.
+            omega_gain (float): Ramp weight for QC dispersion relation (trains A).
+            flux_gain (float): Ramp weight for energy flux matching (trains f).
+            cons_gain (float): Ramp weight for conservative radial flow (trains A/D).
+            q_gain (float): Ramp weight for strong-field D/Q potential.
 
         Returns:
             Tuple containing total combined loss and auxiliary unpackable individual losses.
         """
-        #l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
-        #l_vf_norm = l_vf / vf_ref
         y_pred = m(x)
-        # Per-channel mean first, then average across channels.
-        # This prevents dp_r*/dt (whose relative error is ~9000x larger at init)
-        # from monopolizing the gradient budget over the other 3 channels.
         rel_sq = ((y_pred - y) / (jnp.abs(y) + eps)) ** 2  # (N, 4)
-        l_vf = jnp.mean(rel_sq)  # mean over samples, then channels
+        l_vf = jnp.mean(rel_sq)
         l_vf_norm = l_vf
         rel_abs_mean, rel_abs_comp = _componentwise_relative_error_metrics_from_pred(y_pred, y, eps=eps)
 
         flux_true = y[:, 3]
         flux_pred = y_pred[:, 3]
-        # Use 1% of the flux RMS as the denominator floor so near-zero flux
-        # samples don't blow up the relative error.
         l_flux = jnp.mean(((flux_pred - flux_true) / (jnp.abs(flux_true) + 1e-12)) ** 2)
 
         omega_true = jnp.maximum(y[:, 1], eps)
@@ -1456,8 +1452,8 @@ def train_hybrid_eob_dhnn_model_prelim(
         mask_rad = abs_pr > pr_qc_threshold
         mask_q = abs_pr > pr_q_threshold
 
-        # Smooth quasi-circular weighting prevents the omega channel from
-        # collapsing to zero when a hard mask is sparsely populated.
+        # Smooth quasi-circular weighting for omega: focuses on the QC sector
+        # where A dominates the dispersion relation.
         qc_scale = jnp.maximum(pr_qc_threshold, eps)
         w_qc = jnp.exp(-jnp.square(abs_pr / qc_scale))
         omega_err_sq = ((omega_pred - omega_true) / (jnp.abs(omega_true) + 1e-12)) ** 2
@@ -1470,8 +1466,6 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
         cons_true = y[:, 2] - flux_true * (p_r / p_phi_safe)
         cons_pred = y_pred[:, 2] - flux_pred * (p_r / p_phi_safe)
-        # Use |cons_true| in the denominator (not cons_pred, which blows up when
-        # the prediction is far from truth) with a 1%-RMS floor against near-zero.
         l_cons = _masked_mean(((cons_pred - cons_true) / (jnp.abs(cons_true) + 1e-12)) ** 2, mask_rad)
 
         p_r_safe = jnp.where(
@@ -1481,21 +1475,19 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
         dr_ratio_true = y[:, 0] / p_r_safe
         dr_ratio_pred = y_pred[:, 0] / p_r_safe
-        # True relative error: normalize by |dr_ratio_true| so the loss is scale-free.
         l_q = _masked_mean(((dr_ratio_pred - dr_ratio_true) / (jnp.abs(dr_ratio_true) + 1e-12)) ** 2, mask_q)
-        
-        # Combine losses based on curriculum weighting scales and adaptive components
+
         l_total = (
             l_vf_norm
-            + geom_gain * l_flux
-            + geom_gain * l_omega
-            + geom_gain * l_cons
-            + geom_gain * l_q
+            + omega_gain * l_omega
+            + flux_gain * l_flux
+            + cons_gain * l_cons
+            + q_gain * l_q
         )
         return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(diff_model, static_model, opt_state, x, y, geom_gain):
+    def step(diff_model, static_model, opt_state, x, y, omega_g, flux_g, cons_g, q_g):
         """step
         
         Single optimization step updating model configuration towards multi-objective loss.
@@ -1506,13 +1498,13 @@ def train_hybrid_eob_dhnn_model_prelim(
             opt_state: Optimizer state containing moments.
             x (jnp.ndarray): Input conditions.
             y (jnp.ndarray): True target RHS predictions.
-            geom_gain (float): Active weight for structural optimization.
+            omega_g, flux_g, cons_g, q_g (float): Per-term curriculum gain scalars.
             
         Returns:
             Tuple with the updated model parameters, opt_state, and expanded tracking variables.
         """
         def loss_fn(m):
-            return hybrid_loss_terms(m, x, y, geom_gain)
+            return hybrid_loss_terms(m, x, y, omega_g, flux_g, cons_g, q_g)
 
         (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(diff_model)
         updates, opt_state = optimizer.update(grads, opt_state, diff_model)
@@ -1539,7 +1531,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
-    def r_binned_val_metrics(model, x_val, y_val, geom_gain):
+    def r_binned_val_metrics(model, x_val, y_val, omega_g, flux_g, cons_g, q_g):
         """r_binned_val_metrics
         
         Discretize validation responses across radial separation distance (`r`) bins.
@@ -1550,7 +1542,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             model (eqx.Module): Model predicting the properties.
             x_val (jnp.ndarray): Validation input space.
             y_val (jnp.ndarray): Validation target targets.
-            geom_gain (float): Evaluation spatial evaluation weight.
+            omega_g, flux_g, cons_g, q_g (float): Per-term curriculum gain scalars.
             
         Returns:
             list: Dictionary table denoting metrics calculated solely inside bounds of `r_bin_edges`.
@@ -1572,7 +1564,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             idx = jnp.asarray(idx_np, dtype=jnp.int32)
             x_bin = jnp.take(x_val, idx, axis=0)
             y_bin = jnp.take(y_val, idx, axis=0)
-            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, geom_gain)
+            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, omega_g, flux_g, cons_g, q_g)
             l_vf_b, l_vf_norm_b, l_flux_b, l_omega_b, l_cons_b, l_q_b, *_ = aux_bin
             rows.append(
                 {
@@ -1616,15 +1608,41 @@ def train_hybrid_eob_dhnn_model_prelim(
         ]
         return {"weighted": weighted, "worst": worst_compact}
 
-    geom_unlocked = False
-    geom_unlock_epoch = -1
+    # --- Per-term unlock state ---
+    # Each geometric term has its own unlock epoch and ramp, activated sequentially:
+    #   1. omega (A potential via QC dispersion) — unlocks first
+    #   2. flux  (f network) — unlocks after omega converges
+    #   3. cons  (conservative radial flow) — unlocks with flux
+    #   4. q     (strong-field D/Q sector) — unlocks last
+    omega_unlock_epoch = -1
+    flux_unlock_epoch  = -1
+    cons_unlock_epoch  = -1
+    q_unlock_epoch     = -1
+
+    # VF target thresholds at which each term unlocks. These are conservative:
+    # omega fires when the overall VF is at curriculum_target_vf (default 0.5);
+    # flux/cons fire when VF reaches curriculum_target_vf_flux (default 0.1, after
+    # omega has had a chance to converge); q fires at curriculum_target_vf_q (default 0.05).
+    vf_target_omega = float(training_params.get("curriculum_target_vf_omega", vf_only_target_vf))
+    vf_target_flux  = float(training_params.get("curriculum_target_vf_flux",  0.1 * vf_only_target_vf))
+    vf_target_cons  = float(training_params.get("curriculum_target_vf_cons",  0.1 * vf_only_target_vf))
+    vf_target_q     = float(training_params.get("curriculum_target_vf_q",     0.05 * vf_only_target_vf))
+    ramp_omega = max(1, int(training_params.get("curriculum_ramp_omega", geom_ramp_epochs)))
+    ramp_flux  = max(1, int(training_params.get("curriculum_ramp_flux",  geom_ramp_epochs)))
+    ramp_cons  = max(1, int(training_params.get("curriculum_ramp_cons",  geom_ramp_epochs)))
+    ramp_q     = max(1, int(training_params.get("curriculum_ramp_q",     geom_ramp_epochs)))
+    print("HybridEOB per-term unlock thresholds:",
+          {"omega": vf_target_omega, "flux": vf_target_flux,
+           "cons": vf_target_cons, "q": vf_target_q})
+
     last_val_l_vf = jnp.array(jnp.inf, dtype=x_train.dtype)
     last_val_rel_summary = None
     last_val_pert_ratio = np.inf
     last_val_pert_ratio_comp = None
 
     @eqx.filter_jit
-    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in, geom_g):
+    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in,
+                   omega_g, flux_g, cons_g, q_g):
         def scan_step(carry, batch_idx):
             dm, opt = carry
             x_batch = jnp.take(x_train, batch_idx, axis=0)
@@ -1641,41 +1659,62 @@ def train_hybrid_eob_dhnn_model_prelim(
                 b_l_q,
                 b_rel_abs_mean,
                 b_rel_abs_comp,
-            ) = step(dm, static_model, opt, x_batch, y_batch, geom_g)
+            ) = step(dm, static_model, opt, x_batch, y_batch, omega_g, flux_g, cons_g, q_g)
             metrics = jnp.stack([b_loss, b_l_vf, b_l_vf_norm, b_l_flux, b_l_omega, b_l_cons, b_l_q, b_rel_abs_mean])
             return (dm_next, opt_next), (metrics, b_rel_abs_comp)
-            
-        (diff_model_out, opt_state_out), (all_metrics, all_comp) = jax.lax.scan(scan_step, (diff_model, opt_state), batch_indices_in)
+
+        (diff_model_out, opt_state_out), (all_metrics, all_comp) = jax.lax.scan(
+            scan_step, (diff_model, opt_state), batch_indices_in)
         mean_metrics = jnp.mean(all_metrics, axis=0)
         mean_comp = jnp.mean(all_comp, axis=0)
         return diff_model_out, static_model, opt_state_out, mean_metrics, mean_comp
+
+    def _ramp(unlock_epoch, ramp_len, epoch):
+        """Linear ramp from 0 to 1 over ramp_len epochs after unlock."""
+        if unlock_epoch < 0:
+            return 0.0
+        return min(1.0, (epoch - unlock_epoch + 1) / float(ramp_len))
 
     for epoch in range(int(training_params["adam_epochs"])):
         key, key_train = jax.random.split(key, 2)
         perm = jax.random.permutation(key_train, num_train_samples)
         batch_indices = perm[:used_train_samples].reshape((num_train_batches, effective_batch_size))
 
-        if (not geom_unlocked) and (epoch >= vf_only_min_epochs):
-            if (epoch >= vf_only_max_epochs):
+        vf_now = float(last_val_l_vf)
+
+        # Sequential unlock: each term fires only after its VF threshold is met
+        # (or the hard max-epoch cap is hit) AND after the minimum epoch.
+        if (omega_unlock_epoch < 0) and (epoch >= vf_only_min_epochs):
+            if (vf_now <= vf_target_omega) or (epoch >= vf_only_max_epochs):
+                omega_unlock_epoch = epoch
                 save_model_weights(model, save_weights_path)
-            if (float(last_val_l_vf) <= vf_only_target_vf) or (epoch >= vf_only_max_epochs):
-                geom_unlocked = True
-                geom_unlock_epoch = epoch
-                print(
-                    f"[HybridEOB] Geometric-channel unlock at epoch {epoch} "
-                    f"(last_val_vf={float(last_val_l_vf):.6g})"
-                )
+                print(f"[HybridEOB] Omega unlock at epoch {epoch} (val_vf={vf_now:.4g})")
 
-        if geom_unlocked:
-            geom_gain = min(1.0, (epoch - geom_unlock_epoch + 1) / float(geom_ramp_epochs))
-        else:
-            geom_gain = 0.0
+        if (flux_unlock_epoch < 0) and (omega_unlock_epoch >= 0):
+            if (vf_now <= vf_target_flux) or (epoch >= vf_only_max_epochs):
+                flux_unlock_epoch = epoch
+                cons_unlock_epoch = epoch   # cons fires together with flux
+                print(f"[HybridEOB] Flux+Cons unlock at epoch {epoch} (val_vf={vf_now:.4g})")
 
-        geom_gain_arr = jnp.array(geom_gain, dtype=x_train.dtype)
+        if (q_unlock_epoch < 0) and (flux_unlock_epoch >= 0):
+            if (vf_now <= vf_target_q) or (epoch >= vf_only_max_epochs):
+                q_unlock_epoch = epoch
+                print(f"[HybridEOB] Q unlock at epoch {epoch} (val_vf={vf_now:.4g})")
+
+        omega_gain = _ramp(omega_unlock_epoch, ramp_omega, epoch)
+        flux_gain  = _ramp(flux_unlock_epoch,  ramp_flux,  epoch)
+        cons_gain  = _ramp(cons_unlock_epoch,  ramp_cons,  epoch)
+        q_gain     = _ramp(q_unlock_epoch,     ramp_q,     epoch)
+
+        omega_g_arr = jnp.array(omega_gain, dtype=x_train.dtype)
+        flux_g_arr  = jnp.array(flux_gain,  dtype=x_train.dtype)
+        cons_g_arr  = jnp.array(cons_gain,  dtype=x_train.dtype)
+        q_g_arr     = jnp.array(q_gain,     dtype=x_train.dtype)
 
         diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
         diff_model, static_model, opt_state, epoch_metrics, train_rel_abs_comp = scan_epoch(
-            diff_model, static_model, opt_state, batch_indices, geom_gain_arr
+            diff_model, static_model, opt_state, batch_indices,
+            omega_g_arr, flux_g_arr, cons_g_arr, q_g_arr
         )
         model = eqx.combine(diff_model, static_model)
         train_loss = epoch_metrics[0]
@@ -1687,7 +1726,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         train_l_q = epoch_metrics[6]
         train_rel_abs_mean = epoch_metrics[7]
 
-        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, geom_gain)
+        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, omega_gain, flux_gain, cons_gain, q_gain)
         (
             val_l_vf,
             val_l_vf_norm,
@@ -1743,7 +1782,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 np.asarray(val_rel_abs_comp),
             )
             if log_r_binned_val:
-                binned_rows = r_binned_val_metrics(model, x_val, y_val, geom_gain)
+                binned_rows = r_binned_val_metrics(model, x_val, y_val, omega_gain, flux_gain, cons_gain, q_gain)
 #                print("HybridEOB Val r-bin summary:", compact_r_binned_summary(binned_rows))
 
         if stop_on_rel_err and (epoch >= rel_err_min_epochs) and (float(val_rel_abs_mean) <= rel_err_target):
@@ -1793,15 +1832,26 @@ if __name__ == "__main__":
         "batch_size": 8192,
         "warmup_steps": 2000,
         "loss_eps": 1e-8,
-        "ema_alpha": 0.15,
         # -- Weight I/O --
         "load_weights_path": "",
         "save_weights_path": f"saved_models/{experiment}_weights_{hidden_dim}_{depth}.eqx",
         # -- Curriculum --
-        "curriculum_target_vf": 1e-3,
+        # Phase 1 (VF only): train until val_vf <= curriculum_target_vf  OR  max_epochs hit.
+        # Omega (QC dispersion / A potential) unlocks first at curriculum_target_vf_omega.
+        # Flux + Cons unlock together at curriculum_target_vf_flux (needs correct omega).
+        # Q (strong-field D/Q) unlocks last at curriculum_target_vf_q.
+        "curriculum_target_vf": 0.5,          # overall VF threshold → omega unlock
+        "curriculum_target_vf_omega": 0.5,    # same as target_vf (omega unlocks with VF)
+        "curriculum_target_vf_flux": 0.05,    # flux+cons fire once VF is ~10x better
+        "curriculum_target_vf_cons": 0.05,    # (same epoch as flux)
+        "curriculum_target_vf_q": 0.01,       # q fires when VF is very well converged
         "curriculum_min_epochs": 50,
-        "curriculum_max_epochs": 400,
-        "curriculum_ramp_epochs": 100,
+        "curriculum_max_epochs": 2000,         # hard cap: all terms unlock at epoch 2000
+        "curriculum_ramp_epochs": 200,         # ramp length for all terms (can override per-term)
+        "curriculum_ramp_omega": 200,
+        "curriculum_ramp_flux": 200,
+        "curriculum_ramp_cons": 200,
+        "curriculum_ramp_q": 200,
         # -- pr-mask quantiles --
         "qc_frac": 0.15,
         "q_frac": 0.80,

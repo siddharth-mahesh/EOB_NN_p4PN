@@ -123,10 +123,10 @@ class Hybrid_EOB_DHNN(eqx.Module):
         Initializes the Hybrid DHNN with tunable depth per potential and relaxed output ceilings.
         """
         A_key, D_key, Q_key, f_key = jax.random.split(key, 4)
-        self.A_head = ScalarPotentialHead(A_key, 2, hidden_dim_A, depth_A, output_init_scale_A)
-        self.D_head = ScalarPotentialHead(D_key, 2, hidden_dim_D, depth_D, output_init_scale_D)
-        self.Q_head = ScalarPotentialHead(Q_key, 3, hidden_dim_Q, depth_Q, output_init_scale_Q)
-        self.f_head = ScalarPotentialHead(f_key, 2, hidden_dim_f, depth_f, output_init_scale_f)
+        self.A_head = ScalarPotentialHead(A_key, 3, hidden_dim_A, depth_A, output_init_scale_A)
+        self.D_head = ScalarPotentialHead(D_key, 3, hidden_dim_D, depth_D, output_init_scale_D)
+        self.Q_head = ScalarPotentialHead(Q_key, 4, hidden_dim_Q, depth_Q, output_init_scale_Q)
+        self.f_head = ScalarPotentialHead(f_key, 3, hidden_dim_f, depth_f, output_init_scale_f)
         self._set_eob_constants_3PN = set_eob_constants_3PN
         self.srate = srate
 
@@ -143,10 +143,9 @@ class Hybrid_EOB_DHNN(eqx.Module):
     def _bounded_positive(raw: jax.Array, floor: float, vmax: float) -> jax.Array:
         """bounded_positive
         
-        Apply a bounding function that clips raw output via softplus and an upper bound limit.
+        Apply a bounding function that clips raw output via sigmoid and an upper bound limit.
         """
-        pos = floor + jax.nn.softplus(raw)
-        return jnp.clip(pos, floor, vmax)
+        return floor + (vmax - floor) * jax.nn.sigmoid(raw)
 
     def _a_potential(self, r: jax.Array, nu: jax.Array) -> jax.Array:
         """a_potential
@@ -154,7 +153,9 @@ class Hybrid_EOB_DHNN(eqx.Module):
         Compute the conservative A potential.
         """
         u = 1.0 / jnp.maximum(r, 1e-12)
-        neural_in = jnp.array([nu, u], dtype=r.dtype)
+        # ln(u) is explicitly provided so the MLP need not reconstruct it from u.
+        # The SEOBNRv5 A potential has ln(u) terms at 5PN order.
+        neural_in = jnp.array([nu, u, jnp.log(u)], dtype=r.dtype)
         raw = self.A_head(neural_in)
         return self._bounded_positive(raw, self.A_floor, self.A_max)
 
@@ -164,7 +165,8 @@ class Hybrid_EOB_DHNN(eqx.Module):
         Compute the conservative D potential.
         """
         u = 1.0 / jnp.maximum(r, 1e-12)
-        neural_in = jnp.array([nu, u], dtype=r.dtype)
+        # ln(u) is explicitly provided for the same reason as in _a_potential.
+        neural_in = jnp.array([nu, u, jnp.log(u)], dtype=r.dtype)
         raw = self.D_head(neural_in)
         return self._bounded_positive(raw, self.D_floor, self.D_max)
 
@@ -174,7 +176,8 @@ class Hybrid_EOB_DHNN(eqx.Module):
         Compute the strong-field modifying Q potential.
         """
         u = 1.0 / jnp.maximum(r, 1e-12)
-        neural_in = jnp.array([nu, u, prstar], dtype=r.dtype)
+        # ln(u) added for consistency with A and D; Q also acquires log corrections at high PN.
+        neural_in = jnp.array([nu, u, prstar, jnp.log(u)], dtype=r.dtype)
         raw = self.Q_head(neural_in)
         return self._bounded_positive(raw, self.Q_floor, self.Q_max)
 
@@ -183,8 +186,8 @@ class Hybrid_EOB_DHNN(eqx.Module):
         
         Compute the f amplitude modifier for strain and flux.
         """
-        x = jnp.power(jnp.maximum(omega, 1e-12), 2.0 / 3.0)
-        neural_in = jnp.array([nu, x], dtype=omega.dtype)
+        x = jnp.power(jnp.maximum(omega, 1e-12), 1.0 / 3.0)
+        neural_in = jnp.array([nu, x, jnp.log(x)], dtype=omega.dtype)
         raw = self.f_head(neural_in)
         return self._bounded_positive(raw, self.f_floor, self.f_max)
 
