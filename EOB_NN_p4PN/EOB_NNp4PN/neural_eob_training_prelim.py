@@ -1410,7 +1410,7 @@ def train_hybrid_eob_dhnn_model_prelim(
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
-    def hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
+    def hybrid_loss_terms(m, x, y, geom_gain):
         """hybrid_loss_terms
         
         Evaluate the multi-objective loss for the Hybrid EOB model.
@@ -1420,32 +1420,33 @@ def train_hybrid_eob_dhnn_model_prelim(
         - Geometric energy flux matching (`l_flux`)
         - Angular momentum flow (`l_omega`) 
         - Conservative flow (`l_cons`)
-        - Strong field potential mappings (`l_q_raw`)
+        - Strong field potential mappings (`l_q`)
         
         Args:
             m (eqx.Module): Evaluated Model.
             x (jnp.ndarray): Input batch.
             y (jnp.ndarray): Target RHS.
-            q_gain (float): Ramp weight applied to Q scalar matching term.
             geom_gain (float): Ramp weight applied to geometry component matching terms.
-            w_flux_dyn (float): Dynamic EMA inverse weight for flux loss.
-            w_omega_dyn (float): Dynamic EMA inverse weight for omega loss.
-            w_cons_dyn (float): Dynamic EMA inverse weight for conservative loss.
-            w_q_dyn (float): Dynamic EMA inverse weight for Q potential loss.
-            
+
         Returns:
             Tuple containing total combined loss and auxiliary unpackable individual losses.
         """
         #l_vf = _standardized_vf_loss_from_pred(y_pred, y, vf_scales, eps)
         #l_vf_norm = l_vf / vf_ref
-        l_vf = relative_vector_field_loss(m, x, y)
-        l_vf_norm = l_vf
         y_pred = m(x)
+        # Per-channel mean first, then average across channels.
+        # This prevents dp_r*/dt (whose relative error is ~9000x larger at init)
+        # from monopolizing the gradient budget over the other 3 channels.
+        rel_sq = ((y_pred - y) / (jnp.abs(y) + eps)) ** 2  # (N, 4)
+        l_vf = jnp.mean(rel_sq)  # mean over samples, then channels
+        l_vf_norm = l_vf
         rel_abs_mean, rel_abs_comp = _componentwise_relative_error_metrics_from_pred(y_pred, y, eps=eps)
 
         flux_true = y[:, 3]
         flux_pred = y_pred[:, 3]
-        l_flux = jnp.mean((_safe_log_abs(flux_pred, eps) - _safe_log_abs(flux_true, eps)) ** 2)
+        # Use 1% of the flux RMS as the denominator floor so near-zero flux
+        # samples don't blow up the relative error.
+        l_flux = jnp.mean(((flux_pred - flux_true) / (jnp.abs(flux_true) + 1e-12)) ** 2)
 
         omega_true = jnp.maximum(y[:, 1], eps)
         omega_pred = jnp.maximum(y_pred[:, 1], eps)
@@ -1459,7 +1460,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         # collapsing to zero when a hard mask is sparsely populated.
         qc_scale = jnp.maximum(pr_qc_threshold, eps)
         w_qc = jnp.exp(-jnp.square(abs_pr / qc_scale))
-        omega_err_sq = (jnp.log(omega_pred) - jnp.log(omega_true)) ** 2
+        omega_err_sq = ((omega_pred - omega_true) / (jnp.abs(omega_true) + 1e-12)) ** 2
         l_omega = jnp.sum(w_qc * omega_err_sq) / jnp.maximum(jnp.sum(w_qc), 1.0)
 
         p_phi_safe = jnp.where(
@@ -1469,7 +1470,9 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
         cons_true = y[:, 2] - flux_true * (p_r / p_phi_safe)
         cons_pred = y_pred[:, 2] - flux_pred * (p_r / p_phi_safe)
-        l_cons = _masked_mean(((cons_pred - cons_true) / (cons_scale + eps)) ** 2, mask_rad)
+        # Use |cons_true| in the denominator (not cons_pred, which blows up when
+        # the prediction is far from truth) with a 1%-RMS floor against near-zero.
+        l_cons = _masked_mean(((cons_pred - cons_true) / (jnp.abs(cons_true) + 1e-12)) ** 2, mask_rad)
 
         p_r_safe = jnp.where(
             jnp.abs(p_r) < 1e-12,
@@ -1478,21 +1481,21 @@ def train_hybrid_eob_dhnn_model_prelim(
         )
         dr_ratio_true = y[:, 0] / p_r_safe
         dr_ratio_pred = y_pred[:, 0] / p_r_safe
-        l_q_raw = _masked_mean(((dr_ratio_pred - dr_ratio_true) / (q_scale + eps)) ** 2, mask_q)
-        l_q = q_gain * l_q_raw
-
+        # True relative error: normalize by |dr_ratio_true| so the loss is scale-free.
+        l_q = _masked_mean(((dr_ratio_pred - dr_ratio_true) / (jnp.abs(dr_ratio_true) + 1e-12)) ** 2, mask_q)
+        
         # Combine losses based on curriculum weighting scales and adaptive components
         l_total = (
-            w_vf * l_vf_norm
-            + geom_gain * w_flux * w_flux_dyn * l_flux
-            + geom_gain * w_omega * w_omega_dyn * l_omega
-            + geom_gain * w_cons * w_cons_dyn * l_cons
-            + geom_gain * w_q * w_q_dyn * l_q
+            l_vf_norm
+            + geom_gain * l_flux
+            + geom_gain * l_omega
+            + geom_gain * l_cons
+            + geom_gain * l_q
         )
-        return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp)
+        return l_total, (l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(diff_model, static_model, opt_state, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn):
+    def step(diff_model, static_model, opt_state, x, y, geom_gain):
         """step
         
         Single optimization step updating model configuration towards multi-objective loss.
@@ -1503,23 +1506,18 @@ def train_hybrid_eob_dhnn_model_prelim(
             opt_state: Optimizer state containing moments.
             x (jnp.ndarray): Input conditions.
             y (jnp.ndarray): True target RHS predictions.
-            q_gain (float): Active weight for Q optimization.
             geom_gain (float): Active weight for structural optimization.
-            w_flux_dyn (float): Dynamic EMA weight for flux loss.
-            w_omega_dyn (float): Dynamic EMA weight for omega loss.
-            w_cons_dyn (float): Dynamic EMA weight for conservative loss.
-            w_q_dyn (float): Dynamic EMA weight for Q potential loss.
             
         Returns:
             Tuple with the updated model parameters, opt_state, and expanded tracking variables.
         """
         def loss_fn(m):
-            return hybrid_loss_terms(m, x, y, q_gain, geom_gain, w_flux_dyn, w_omega_dyn, w_cons_dyn, w_q_dyn)
+            return hybrid_loss_terms(m, x, y, geom_gain)
 
         (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(diff_model)
         updates, opt_state = optimizer.update(grads, opt_state, diff_model)
         diff_model = eqx.apply_updates(diff_model, updates)
-        l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q_raw, rel_abs_mean, rel_abs_comp = aux
+        l_vf, l_vf_norm, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp = aux
         return (
             diff_model,
             opt_state,
@@ -1529,7 +1527,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             l_flux,
             l_omega,
             l_cons,
-            l_q_raw,
+            l_q,
             rel_abs_mean,
             rel_abs_comp,
         )
@@ -1541,7 +1539,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
-    def r_binned_val_metrics(model, x_val, y_val, q_gain, geom_gain):
+    def r_binned_val_metrics(model, x_val, y_val, geom_gain):
         """r_binned_val_metrics
         
         Discretize validation responses across radial separation distance (`r`) bins.
@@ -1552,7 +1550,6 @@ def train_hybrid_eob_dhnn_model_prelim(
             model (eqx.Module): Model predicting the properties.
             x_val (jnp.ndarray): Validation input space.
             y_val (jnp.ndarray): Validation target targets.
-            q_gain (float): Evaluation scalar weight.
             geom_gain (float): Evaluation spatial evaluation weight.
             
         Returns:
@@ -1575,7 +1572,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             idx = jnp.asarray(idx_np, dtype=jnp.int32)
             x_bin = jnp.take(x_val, idx, axis=0)
             y_bin = jnp.take(y_val, idx, axis=0)
-            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, q_gain, geom_gain, 1.0, 1.0, 1.0, 1.0)
+            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, geom_gain)
             l_vf_b, l_vf_norm_b, l_flux_b, l_omega_b, l_cons_b, l_q_b, *_ = aux_bin
             rows.append(
                 {
@@ -1626,14 +1623,8 @@ def train_hybrid_eob_dhnn_model_prelim(
     last_val_pert_ratio = np.inf
     last_val_pert_ratio_comp = None
 
-    ema_l_flux = 1.0
-    ema_l_omega = 1.0
-    ema_l_cons = 1.0
-    ema_l_q = 1.0
-    ema_alpha = float(training_params.get("ema_alpha", 0.15))
-
     @eqx.filter_jit
-    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in, q_g, geom_g, w_flux_d, w_omega_d, w_cons_d, w_q_d):
+    def scan_epoch(diff_model, static_model, opt_state, batch_indices_in, geom_g):
         def scan_step(carry, batch_idx):
             dm, opt = carry
             x_batch = jnp.take(x_train, batch_idx, axis=0)
@@ -1650,7 +1641,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 b_l_q,
                 b_rel_abs_mean,
                 b_rel_abs_comp,
-            ) = step(dm, static_model, opt, x_batch, y_batch, q_g, geom_g, w_flux_d, w_omega_d, w_cons_d, w_q_d)
+            ) = step(dm, static_model, opt, x_batch, y_batch, geom_g)
             metrics = jnp.stack([b_loss, b_l_vf, b_l_vf_norm, b_l_flux, b_l_omega, b_l_cons, b_l_q, b_rel_abs_mean])
             return (dm_next, opt_next), (metrics, b_rel_abs_comp)
             
@@ -1680,38 +1671,11 @@ def train_hybrid_eob_dhnn_model_prelim(
         else:
             geom_gain = 0.0
 
-        if epoch < q_start_epoch:
-            q_gain_raw = 0.0
-        else:
-            q_gain_raw = min(1.0, (epoch - q_start_epoch + 1) / float(q_ramp_epochs))
-        q_gain = geom_gain * q_gain_raw
-
-        # Calculate dynamic inverse EMA weights, normalized safely
-        w_flux_inv = 1.0 / max(float(ema_l_flux), eps)
-        w_omega_inv = 1.0 / max(float(ema_l_omega), eps)
-        w_cons_inv = 1.0 / max(float(ema_l_cons), eps)
-        w_q_inv = 1.0 / max(float(ema_l_q), eps)
-        
-        sum_inv = w_flux_inv + w_omega_inv + w_cons_inv + w_q_inv
-        
-        # Scale sum_inv to a base multiplier of 4.0
-        scale_fac = 4.0 / max(sum_inv, eps)
-        
-        dynamic_w_flux = w_flux_inv * scale_fac
-        dynamic_w_omega = w_omega_inv * scale_fac
-        dynamic_w_cons = w_cons_inv * scale_fac
-        dynamic_w_q = w_q_inv * scale_fac
-
-        q_gain_arr = jnp.array(q_gain, dtype=x_train.dtype)
         geom_gain_arr = jnp.array(geom_gain, dtype=x_train.dtype)
-        w_flux_arr = jnp.array(dynamic_w_flux, dtype=x_train.dtype)
-        w_omega_arr = jnp.array(dynamic_w_omega, dtype=x_train.dtype)
-        w_cons_arr = jnp.array(dynamic_w_cons, dtype=x_train.dtype)
-        w_q_arr = jnp.array(dynamic_w_q, dtype=x_train.dtype)
 
         diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
         diff_model, static_model, opt_state, epoch_metrics, train_rel_abs_comp = scan_epoch(
-            diff_model, static_model, opt_state, batch_indices, q_gain_arr, geom_gain_arr, w_flux_arr, w_omega_arr, w_cons_arr, w_q_arr
+            diff_model, static_model, opt_state, batch_indices, geom_gain_arr
         )
         model = eqx.combine(diff_model, static_model)
         train_loss = epoch_metrics[0]
@@ -1723,16 +1687,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         train_l_q = epoch_metrics[6]
         train_rel_abs_mean = epoch_metrics[7]
 
-        if train_l_flux > 0:
-            ema_l_flux = (1.0 - ema_alpha) * ema_l_flux + ema_alpha * float(train_l_flux)
-        if train_l_omega > 0:
-            ema_l_omega = (1.0 - ema_alpha) * ema_l_omega + ema_alpha * float(train_l_omega)
-        if train_l_cons > 0:
-            ema_l_cons = (1.0 - ema_alpha) * ema_l_cons + ema_alpha * float(train_l_cons)
-        if train_l_q > 0:
-            ema_l_q = (1.0 - ema_alpha) * ema_l_q + ema_alpha * float(train_l_q)
-
-        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, q_gain, geom_gain, 1.0, 1.0, 1.0, 1.0)
+        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, geom_gain)
         (
             val_l_vf,
             val_l_vf_norm,
@@ -1767,38 +1722,28 @@ def train_hybrid_eob_dhnn_model_prelim(
         if epoch % 10 == 0:
             val_finite_ratio = finite_output_ratio(model, x_val)
             print(
-                f"[HybridEOB] Epoch {epoch}, Loss: {train_loss}, Val Loss: {val_loss}, "
-                f"Val VF: {val_l_vf}, Val Flux: {val_l_flux}, Val Omega: {val_l_omega}, "
-                f"Val Cons: {val_l_cons}, Val Q: {val_l_q}, "
+                f"[HybridEOB] Epoch {epoch}, Loss: {train_loss:.3e}, Val Loss: {val_loss:.3e}, "
+                f"Val VF: {val_l_vf:.3e}, Val Flux: {val_l_flux:.3e}, Val Omega: {val_l_omega:.3e}, "
+                f"Val Cons: {val_l_cons:.3e}, Val Q: {val_l_q:.3e}, "
                 f"ValRel(mean,p95)=({last_val_rel_summary['mean']:.3e}, {last_val_rel_summary['p95']:.3e}), "
-                f"Val finite ratio: {val_finite_ratio}"
-#                f"Train VF: {train_l_vf}, Train VF*: {train_l_vf_norm}, "
-#                f"Train Flux: {train_l_flux}, Train Omega: {train_l_omega}, "
-#                f"Train Cons: {train_l_cons}, Train Q: {train_l_q}, "
-#                f"Train RelAbs: {train_rel_abs_mean}, "
-#                f"Val VF: {val_l_vf}, Val VF*: {val_l_vf_norm}, "
-#                f"Val Flux: {val_l_flux}, Val Omega: {val_l_omega}, "
-#                f"Val Cons: {val_l_cons}, Val Q: {val_l_q}, "
-#                f"Val RelAbs: {val_rel_abs_mean}, "
-#                f"GeomGain: {geom_gain:.3f}, QGain: {q_gain:.3f}, "
-#                f"Val finite ratio: {val_finite_ratio}"
+                f"Val finite ratio: {val_finite_ratio:.3e}"
             )
             if pert_ref_summary is not None:
                 print(
-                    f"[HybridEOB] Val/SEOB-pert ratio ({pert_metric}): "
+                    f"Val/SEOB-pert ratio ({pert_metric}): "
                     f"{last_val_pert_ratio:.3e} (target <= {pert_alpha:.3e})"
                 )
                 print(
-                    "[HybridEOB] Val/SEOB-pert component ratios:",
+                    "Val/SEOB-pert component ratios:",
                     np.asarray(last_val_pert_ratio_comp),
                 )
             print(
-                "HybridEOB RelAbsComp(train,val):",
+                "RelAbsComp(train,val):",
                 np.asarray(train_rel_abs_comp),
                 np.asarray(val_rel_abs_comp),
             )
             if log_r_binned_val:
-                binned_rows = r_binned_val_metrics(model, x_val, y_val, q_gain, geom_gain)
+                binned_rows = r_binned_val_metrics(model, x_val, y_val, geom_gain)
 #                print("HybridEOB Val r-bin summary:", compact_r_binned_summary(binned_rows))
 
         if stop_on_rel_err and (epoch >= rel_err_min_epochs) and (float(val_rel_abs_mean) <= rel_err_target):
@@ -1837,6 +1782,9 @@ if __name__ == "__main__":
     # training parameters
     seed = 0
     key = jax.random.PRNGKey(seed)
+    experiment = "hybrid_eob"
+    hidden_dim = 32
+    depth = 4
     training_params = {
         "experiment": "hybrid_eob",
         # -- Core --
@@ -1848,13 +1796,7 @@ if __name__ == "__main__":
         "ema_alpha": 0.15,
         # -- Weight I/O --
         "load_weights_path": "",
-        "save_weights_path": "hybrid_eob_weights.eqx",
-        # -- Static channel weights --
-        "w_vf": 1.0,
-        "w_flux": 1.0,
-        "w_omega": 1.0,
-        "w_cons": 1.0,
-        "w_q": 0.5,
+        "save_weights_path": f"saved_models/{experiment}_weights_{hidden_dim}_{depth}.eqx",
         # -- Curriculum --
         "curriculum_target_vf": 1e-3,
         "curriculum_min_epochs": 50,
