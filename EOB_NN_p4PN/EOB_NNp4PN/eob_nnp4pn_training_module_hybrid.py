@@ -3,8 +3,12 @@ Hybrid Dissipative Hamiltonian Neural Network (DHNN).
 
 This module implements a hybrid EOB dynamics structure where the overall physics flow
 (conservative and dissipative equations of motion) is preserved, but the core 
-potentials (A, D, Q, f) are fully learned using neural networks instead of 
+potentials (A, D, Q, f) are fully learned as rational neural networks instead of 
 PN-factorized baseline models.
+
+Each potential head is a RationalNet: Linear → P(h)/Q(h) rational activation → Linear.
+This produces a rational function of the inputs — structurally a Padé approximant —
+matching the Padé-resummed form used by SEOBNRv5 for A and D.
 """
 
 from typing import Callable
@@ -15,57 +19,11 @@ import jax.numpy as jnp
 
 from EOB_NN_p4PN.EOB.eob_constants_3pn import set_eob_constants_3PN
 from EOB_NN_p4PN.EOB.strain import strain
-from EOB_NN_p4PN.mlp import MLP
+from EOB_NN_p4PN.rational_net import RationalNet
 
 from EOB_NN_p4PN.gamma import gamma as tgamma
 jax.config.update("jax_enable_x64", True)
 I = 1j
-
-
-class ScalarPotentialHead(eqx.Module):
-    """two_input_scalar_head
-    
-    Two-input scalar head: inputs are [nu, x], output is one scalar.
-    """
-
-    net: MLP
-
-    def __init__(self, key: jax.Array, input_dim: int, hidden_dim: int = 32, depth: int = 2, output_init_scale: float = 1e-3):
-        """initialize_scalar_head
-        
-        Initializes the scalar potential head with an parameterized MLP layer.
-        """
-        self.net = MLP(
-            key=key,
-            input_dim=input_dim,
-            output_dim=1,
-            hidden_dim=hidden_dim,
-            depth=depth,
-            standalone=False,
-        )
-        output_init_scale = float(max(output_init_scale, 0.0))
-        w_shape = self.net.layers[-1].weight.shape
-        b_shape = self.net.layers[-1].bias.shape
-        w_key, b_key = jax.random.split(key, 2)
-        w_init = output_init_scale * jax.random.normal(w_key, w_shape, dtype=self.net.layers[-1].weight.dtype)
-        b_init = output_init_scale * jax.random.normal(b_key, b_shape, dtype=self.net.layers[-1].bias.dtype)
-        
-        # eqx.tree_at replaces the leaves. For tuple, we can use a small function.
-        def replace_last_layer_weight(m):
-            return m.layers[-1].weight
-        def replace_last_layer_bias(m):
-            return m.layers[-1].bias
-
-        self.net = eqx.tree_at(replace_last_layer_weight, self.net, w_init)
-        self.net = eqx.tree_at(replace_last_layer_bias, self.net, b_init)
-
-    def __call__(self, neural_in: jax.Array) -> jax.Array:
-        """call
-        
-        Compute the forward evaluation.
-        """
-        inp = jnp.array(neural_in, dtype=jnp.result_type(neural_in))
-        return self.net(inp)[0]
 
 
 class Hybrid_EOB_DHNN(eqx.Module):
@@ -74,13 +32,18 @@ class Hybrid_EOB_DHNN(eqx.Module):
     Structure is identical to the EOB dynamics flow:
     - conservative dynamics from Hamiltonian gradients
     - dissipative dynamics from flux
-    but A/D/Q/f are black-box neural functions rather than PN-factorized models.
+    but A/D/Q/f are rational neural networks (Padé approximants) rather than
+    PN-factorized models.
+
+    Each head implements: Linear(input → hidden) → P(h)/Q(h) → Linear(hidden → 1)
+    which produces a rational function of the inputs — matching SEOBNRv5's
+    Padé-resummed A and D potentials by construction.
     """
 
-    A_head: ScalarPotentialHead
-    D_head: ScalarPotentialHead
-    Q_head: ScalarPotentialHead
-    f_head: ScalarPotentialHead
+    A_head: RationalNet
+    D_head: RationalNet
+    Q_head: RationalNet
+    f_head: RationalNet
     _set_eob_constants_3PN: Callable = eqx.field(static=True)
     srate: int
 
@@ -101,14 +64,8 @@ class Hybrid_EOB_DHNN(eqx.Module):
         hidden_dim_D: int = 32,
         hidden_dim_Q: int = 32,
         hidden_dim_f: int = 32,
-        depth_A: int = 2,
-        depth_D: int = 2,
-        depth_Q: int = 2,
-        depth_f: int = 2,
-        output_init_scale_A: float = 1e-3,
-        output_init_scale_D: float = 1e-3,
-        output_init_scale_Q: float = 1e-3,
-        output_init_scale_f: float = 1e-3,
+        degree_of_p: int = 4,
+        degree_of_q: int = 5,
         A_floor: float = 1e-4,
         D_floor: float = 1e-4,
         Q_floor: float = 0.0,
@@ -119,14 +76,23 @@ class Hybrid_EOB_DHNN(eqx.Module):
         f_max: float = 20.0,
     ):
         """initialize_hybrid_dhnn
-        
-        Initializes the Hybrid DHNN with tunable depth per potential and relaxed output ceilings.
+
+        Initializes the Hybrid DHNN with rational neural network heads.
+
+        Each head is a RationalNet: Linear → P(h)/Q(h) → Linear, producing a rational
+        function of its inputs (Padé approximant). degree_of_p / degree_of_q control
+        the numerator / denominator polynomial degree of the rational activation.
+
+        Input features (with ln included for logarithmic PN terms):
+            A, D: [nu, u, ln(u)]            (input_dim=3)
+            Q:    [nu, u, p_r*, ln(u)]      (input_dim=4)
+            f:    [nu, v, ln(v)] where v=omega^(1/3) (input_dim=3)
         """
         A_key, D_key, Q_key, f_key = jax.random.split(key, 4)
-        self.A_head = ScalarPotentialHead(A_key, 3, hidden_dim_A, depth_A, output_init_scale_A)
-        self.D_head = ScalarPotentialHead(D_key, 3, hidden_dim_D, depth_D, output_init_scale_D)
-        self.Q_head = ScalarPotentialHead(Q_key, 4, hidden_dim_Q, depth_Q, output_init_scale_Q)
-        self.f_head = ScalarPotentialHead(f_key, 3, hidden_dim_f, depth_f, output_init_scale_f)
+        self.A_head = RationalNet(A_key, input_dim=3, hidden_dim=hidden_dim_A, degree_of_p=degree_of_p, degree_of_q=degree_of_q)
+        self.D_head = RationalNet(D_key, input_dim=3, hidden_dim=hidden_dim_D, degree_of_p=degree_of_p, degree_of_q=degree_of_q)
+        self.Q_head = RationalNet(Q_key, input_dim=4, hidden_dim=hidden_dim_Q, degree_of_p=degree_of_p, degree_of_q=degree_of_q)
+        self.f_head = RationalNet(f_key, input_dim=3, hidden_dim=hidden_dim_f, degree_of_p=degree_of_p, degree_of_q=degree_of_q)
         self._set_eob_constants_3PN = set_eob_constants_3PN
         self.srate = srate
 

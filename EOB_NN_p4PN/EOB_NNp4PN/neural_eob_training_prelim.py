@@ -1879,13 +1879,10 @@ if __name__ == "__main__":
             "hidden_dim_D": 32,
             "hidden_dim_Q": 32,
             "hidden_dim_f": 32,
-            "depth_A": 4,
-            "depth_D": 4,
-            "depth_Q": 4, "depth_f": 4,
-            "output_init_scale_A": 1e-3,
-            "output_init_scale_D": 1e-3,
-            "output_init_scale_Q": 1e-3,
-            "output_init_scale_f": 1e-3,
+            # Padé order for the rational activation: P[degree_of_p] / Q[degree_of_q]
+            # per neuron per head. P[4]/Q[5] gives 9 free parameters per neuron.
+            "degree_of_p": 4,
+            "degree_of_q": 5,
             "A_floor": 1e-4,
             "D_floor": 1e-4,
             "Q_floor": 0.0,
