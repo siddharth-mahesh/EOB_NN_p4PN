@@ -374,16 +374,19 @@ def train_hybrid_eob_dhnn_model_prelim(
     lr_peak = float(training_params.get("learning_rate", 3e-4))
     lr_init = 0.1 * lr_peak
     lr_end = 0.01 * lr_peak
-    total_steps = int(training_params["adam_epochs"]) * num_train_batches
-    warmup_steps_requested = int(training_params.get("warmup_steps", int(0.1 * total_steps)))
+    total_steps = int(training_params["max_epochs"]) * num_train_batches
+    warmup_steps_requested = int(0.1 * total_steps)
     warmup_steps = min(max(0, warmup_steps_requested), max(0, total_steps - 1))
     decay_steps = max(total_steps, warmup_steps + 1)
-    lr_schedule = optax.warmup_cosine_decay_schedule(
+    single_stage_lr_schedule = optax.warmup_cosine_decay_schedule(
         init_value=lr_init,
         peak_value=lr_peak,
         warmup_steps=warmup_steps,
         decay_steps=decay_steps,
         end_value=lr_end,
+    )
+    lr_schedule = optax.join_schedules(
+        [single_stage_lr_schedule] * 3,        
     )
     print(
         "HybridEOB LR schedule:",
@@ -680,8 +683,8 @@ def train_hybrid_eob_dhnn_model_prelim(
     stage_2_unlock_epoch = -1
 
     stage_0_gain_now = 1.0
-    stage_1_gain_now = 0.0
-    stage_2_gain_now = 0.0
+    stage_1_gain_now = 0.1
+    stage_2_gain_now = 0.1
     
     # VF thresholds that trigger each stage unlock.
     # Stage 1 (omega+rdot): force-unlocks at stage0_epochs; also unlocks early if VF ≤ stage0_vf_target.
@@ -738,7 +741,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         # (or the hard max-epoch cap is hit) AND after the minimum epoch.
         if (stage_1_unlock_epoch < 0) and (epoch >= any_stage_min_epochs):
             if (vf_now <= vf_target_0) or (epoch >= any_stage_max_epochs):
-                stage_0_gain_now = 0.0
+                stage_0_gain_now = 0.1
                 stage_1_gain_now = 1.0
                 stage_1_unlock_epoch = epoch
                 save_model_weights(model, f"{save_weights_path}_stage_0.eqx")
@@ -747,7 +750,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         if (stage_2_unlock_epoch < 0) and (stage_1_unlock_epoch > 0) and (epoch >= stage_1_unlock_epoch + any_stage_min_epochs):
             if (vf_now <= vf_target_1) or (epoch >= stage_1_unlock_epoch + any_stage_max_epochs):
                 stage_2_unlock_epoch = epoch
-                stage_1_gain_now = 0.0
+                stage_1_gain_now = 0.1
                 stage_2_gain_now = 1.0
                 save_model_weights(model, f"{save_weights_path}_stage_1.eqx")
                 print(f"[HybridEOB] Stage 2 unlocked at epoch {epoch} (val_vf={vf_now:.4g})")
@@ -882,9 +885,9 @@ if __name__ == "__main__":
         # Stage 1: conservative channels (omega=dphi/dt, rdot=dr/dt) fire together.
         # Stage 2: dissipative channels (flux+prdot) fire together.
         # adam_epochs covers stage 0 + stage 1 ramp + stage 2 ramp + 500-epoch buffer.
-        "any_stage_min_epochs":          50,   # Never unlock before this many epochs
-        "any_stage_max_epochs":       2000,    # Move to next stage after this many epochs
-        "adam_epochs":       6000,    # Total epochs for adam
+        "min_epochs":          50,   # Never unlock before this many epochs
+        "max_epochs":       1000,    # Move to next stage after this many epochs
+        "adam_epochs":       3000,    # Total epochs for adam = max_epochs * num of stages
         # -- pr-mask quantiles --
         "qc_frac": 0.15,
         "q_frac": 0.80,
@@ -895,82 +898,26 @@ if __name__ == "__main__":
         # -- Diagnostics --
         "log_r_binned_val": True,
     }
-    experiment = str(training_params.get("experiment", "blackbox")).lower()
-    if experiment == "blackbox":
-        model_params = {
-            "key": key,
-            "model_class": BlackBoxDHNN,
-            "hidden_dim": 64,
-            "h_scale": 1.0,
-            "d_scale": 0.5,
-        }
-    elif experiment == "hybrid_eob":
-        model_params = {
-            "key": key,
-            "model_class": Hybrid_EOB_DHNN,
-            "hidden_dim_A": hidden_dim,
-            "hidden_dim_D": hidden_dim,
-            "hidden_dim_Q": hidden_dim,
-            "hidden_dim_f": hidden_dim,
-            # Padé order for the rational activation: P[degree_of_p] / Q[degree_of_q]
-            # per neuron per head. P[4]/Q[5] gives 9 free parameters per neuron.
-            "degree_of_p": p_dim,
-            "degree_of_q": q_dim,
-            "A_floor": 1e-4,
-            "D_floor": 1e-4,
-            "Q_floor": 0.0,
-            "f_floor": 1e-4,
-            "A_max": 4.0,
-            "D_max": 4.0,
-            "Q_max": 8.0,
-            "f_max": 8.0,
-        }
-    elif experiment == "eob_v2":
-        model_params = {
-            "key": key,
-            "model_class": Neural_EOB_V2,
-            "enable_A": True,
-            "enable_D": True,
-            "enable_Q": False,
-            "enable_f": True,
-            "enable_delta": False,
-            "basis_order_A": 3,
-            "basis_order_D": 3,
-            "basis_order_Q": 3,
-            "basis_order_f": 3,
-            "basis_order_delta": 3,
-            "hidden_dim_A": 64,
-            "hidden_dim_D": 64,
-            "hidden_dim_Q": 64,
-            "hidden_dim_f": 64,
-            "hidden_dim_delta": 64,
-            "output_init_scale_A": 5e-3,
-            "output_init_scale_D": 5e-3,
-            "output_init_scale_Q": 5e-3,
-            "output_init_scale_f": 5e-3,
-            "output_init_scale_delta": 5e-3,
-            "A_corr_bound": 0.5,
-            "D_corr_bound": 0.1,
-            "Q_corr_bound": 0.2,
-            "f_corr_bound": 0.1,
-            "delta_corr_bound": 0.1,
-        }
-    elif experiment == "eob_v1":
-        model_params = {
-            "key": key,
-            "model_class": Neural_EOB,
-            "srate": 2000,
-            "hidden_dim_A": 64,
-            "hidden_dim_D": 64,
-            "hidden_dim_Q": 64,
-            "hidden_dim_f": 64,
-            "hidden_dim_delta": 64,
-        }
-    else:
-        raise ValueError(
-            f"Unknown training_params['experiment']={experiment!r}. "
-            "Use 'blackbox', 'hybrid_eob', 'eob_v1', or 'eob_v2'."
-        )
+    model_params = {
+        "key": key,
+        "model_class": Hybrid_EOB_DHNN,
+        "hidden_dim_A": hidden_dim,
+        "hidden_dim_D": hidden_dim,
+        "hidden_dim_Q": hidden_dim,
+        "hidden_dim_f": hidden_dim,
+        # Padé order for the rational activation: P[degree_of_p] / Q[degree_of_q]
+        # per neuron per head. P[4]/Q[5] gives 9 free parameters per neuron.
+        "degree_of_p": p_dim,
+        "degree_of_q": q_dim,
+        "A_floor": 1e-4,
+        "D_floor": 1e-4,
+        "Q_floor": 1e-4,
+        "f_floor": 1e-4,
+        "A_max": 8.0,
+        "D_max": 8.0,
+        "Q_max": 8.0,
+        "f_max": 8.0,
+    }
     # load training data
     x_train = np.load("seob_x_train_prelim.npy")
     y_train = np.load("seob_y_train_prelim.npy")
@@ -985,15 +932,6 @@ if __name__ == "__main__":
     else:
         print("WARNING: seob_erel_val_prelim.npy not found; perturbation-threshold stopping disabled.")
     # train model
-    if experiment == "blackbox":
-        trained_model = train_blackbox_dhnn_model_prelim(
-            (x_train, y_train), val_data, model_params, training_params
-        )
-    elif experiment == "hybrid_eob":
-        trained_model = train_hybrid_eob_dhnn_model_prelim(
-            (x_train, y_train), val_data, model_params, training_params
-        )
-    else:
-        trained_model = train_dhnn_model_prelim(
-            (x_train, y_train), val_data, model_params, training_params
-        )
+    trained_model = train_hybrid_eob_dhnn_model_prelim(
+        (x_train, y_train), val_data, model_params, training_params
+    )
