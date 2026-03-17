@@ -741,15 +741,15 @@ def train_hybrid_eob_dhnn_model_prelim(
                 stage_0_gain_now = 0.0
                 stage_1_gain_now = 1.0
                 stage_1_unlock_epoch = epoch
-                save_model_weights(model, f"{save_weights_path}_stage1.eqx")
+                save_model_weights(model, f"{save_weights_path}_stage_0.eqx")
                 print(f"[HybridEOB] Stage 1 unlocked at epoch {epoch} (val_vf={vf_now:.4g})")
 
-        if (stage_2_unlock_epoch < 0) and (epoch >= stage_1_unlock_epoch + any_stage_min_epochs):
+        if (stage_2_unlock_epoch < 0) and (stage_1_unlock_epoch > 0) and (epoch >= stage_1_unlock_epoch + any_stage_min_epochs):
             if (vf_now <= vf_target_1) or (epoch >= stage_1_unlock_epoch + any_stage_max_epochs):
                 stage_2_unlock_epoch = epoch
                 stage_1_gain_now = 0.0
                 stage_2_gain_now = 1.0
-                save_model_weights(model, f"{save_weights_path}_stage2.eqx")
+                save_model_weights(model, f"{save_weights_path}_stage_1.eqx")
                 print(f"[HybridEOB] Stage 2 unlocked at epoch {epoch} (val_vf={vf_now:.4g})")
 
         stage0_g_arr = jnp.array(stage_0_gain_now, dtype=x_train.dtype)
