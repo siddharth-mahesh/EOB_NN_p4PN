@@ -476,21 +476,27 @@ def train_hybrid_eob_dhnn_model_prelim(
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
-    def get_trainable_mask(model, s0_g, s1_g, s2_g):
+    def get_trainable_mask(model, s0_g, s1_g, s2_g, s3_g):
         """get_trainable_mask
         
         Generate a boolean mask tree for selectively freezing neural heads.
-        - Stage 0: Conservative only (A, D, Q trainable, f frozen)
+        - Stage 0: Conservative coordinate only (A, D, Q trainable, f frozen)
         - Stage 1: Dissipative only (f trainable, A, D, Q frozen)
-        - Stage 2: Fine-tuning (All heads trainable)
+        - Stage 2: Conservative radial momentum (Q trainable, A, D, f frozen)
+        - Stage 3: Fine-tuning (All heads trainable)
         """
         # Start with all frozen structure
         mask = jax.tree_util.tree_map(lambda _: False, model)
         is_inexact = jax.tree_util.tree_map(eqx.is_inexact_array, model)
 
-        if float(s2_g) >= 1.0:
-            # Stage 2: Fine tuning (All)
+        if float(s3_g) >= 1.0:
+            # Stage 3: Fine tuning (All)
             mask = jax.tree_util.tree_map(lambda _: True, model)
+        elif float(s2_g) >= 1.0:
+            # Stage 2: Conservative radial momentum (Q_head)
+            # Use tree_map to ensure the mask sub-tree matches the head structure
+            Q_mask = jax.tree_util.tree_map(lambda _: True, model.Q_head)
+            mask = eqx.tree_at(lambda m: m.Q_head, mask, Q_mask)
         elif float(s1_g) >= 1.0:
             # Stage 1: Dissipative only (f_head)
             # Use tree_map to ensure the mask sub-tree matches the head structure
@@ -507,7 +513,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         # We must return None where is_inexact is False to match the structural presence of None in grads
         return jax.tree_util.tree_map(lambda m, i: m if i else None, mask, is_inexact)
 
-    def hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain):
+    def hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain):
         """hybrid_loss_terms
         
         Evaluate the multi-objective loss for the Hybrid EOB model.
@@ -515,28 +521,29 @@ def train_hybrid_eob_dhnn_model_prelim(
         Each geometric loss term has its own gain scalar so that they can be
         activated sequentially as the vector field loss converges:
         - l_omega (A potential via QC dispersion) activates first
+        - l_q (strong-field D/Q sector) activates along with l_omega
         - l_flux (f network, needs correct omega input) unlocks after omega converges
-        - l_cons (conservative flow in radial sector) unlocks with flux
-        - l_q (strong-field D/Q sector) unlocks last
+        - l_cons (conservative flow in radial sector) unlocks last
         
         Args:
             m (eqx.Module): Evaluated Model.
             x (jnp.ndarray): Input batch.
             y (jnp.ndarray): Target RHS.
-            stage_0_gain (float): Ramp weight for stage 0 training.
-            stage_1_gain (float): Ramp weight for conservative only training.
-            stage_2_gain (float): Ramp weight for dissipative training.
+            stage_0_gain (float): Ramp weight for conservative only training.
+            stage_1_gain (float): Ramp weight for flux training.
+            stage_2_gain (float): Ramp weight for conservative radial momentum training.
+            stage_3_gain (float): Ramp weight for fine-tuning.
             
         Returns:
             Tuple containing total combined loss and auxiliary unpackable individual losses.
         """
 
         eps = float(training_params.get("loss_eps", 1e-8))
-        # Stage 0 loss is plain vector field
+        # Stage 3 loss is plain vector field
         y_pred = m(x)
         rel_sq = ((y_pred - y) / (jnp.abs(y) + eps)) ** 2  # (N, 4)
         l_vf = jnp.mean(rel_sq)
-        l_stage_2 = l_vf
+        l_stage_3 = l_vf
         rel_abs_mean, rel_abs_comp = _componentwise_relative_error_metrics_from_pred(y_pred, y, eps=eps)
         
         p_rstar = x[:, 3]
@@ -552,7 +559,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             p_phi,
         )
         
-        # Stage 1 loss is purely conservative channels
+        # Stage 0 loss is purely conservative channels
         omega_true = jnp.maximum(y[:, 1], eps)
         omega_pred = jnp.maximum(y_pred[:, 1], eps)
         dr_ratio_true = y[:, 0] / p_rstar_safe
@@ -562,31 +569,35 @@ def train_hybrid_eob_dhnn_model_prelim(
         l_omega = jnp.mean(omega_err_sq)
         l_stage_0 = l_omega + l_q
 
-        # Stage 2 Flux + Loss 
+        # Stage 1 Flux
         flux_true = y[:, 3]
         flux_pred = y_pred[:, 3]
         l_flux = jnp.mean(((flux_pred - flux_true) / (jnp.abs(flux_true) + 1e-12)) ** 2)
+        l_stage_1 = l_flux
+        
+        # Stage 2 Conservative radial momentum
         cons_true = y[:, 2] - flux_true * (p_rstar / p_phi_safe)
-        cons_pred = y_pred[:, 2] - flux_true * (p_rstar / p_phi_safe)
+        cons_pred = y_pred[:, 2] - flux_pred * (p_rstar / p_phi_safe)
         l_cons = jnp.mean(((cons_pred - cons_true) / (jnp.abs(cons_true) + 1e-12)) ** 2)
-        l_stage_1 = l_flux + l_cons
+        l_stage_2 = l_cons
         
         l_total = (
             stage_0_gain * l_stage_0
             + stage_1_gain * l_stage_1
             + stage_2_gain * l_stage_2
+            + stage_3_gain * l_stage_3
         )
         return l_total, (l_vf, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(diff_model, static_model, opt_state, x, y, stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask):
+    def step(diff_model, static_model, opt_state, x, y, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain, trainable_mask):
         """step
         
         Single optimization step updating model configuration towards multi-objective loss.
         Selective head freezing is applied by zeroing out gradients and updates for frozen heads.
         """
         def loss_fn(m):
-            return hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain)
+            return hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain)
 
         (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(diff_model)
         
@@ -621,7 +632,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         y_pred = model(x)
         return jnp.mean(jnp.isfinite(y_pred))
 
-    def r_binned_val_metrics(model, x_val, y_val, stage_0_gain, stage_1_gain, stage_2_gain):
+    def r_binned_val_metrics(model, x_val, y_val, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain):
         """r_binned_val_metrics
         
         Discretize validation responses across radial separation distance (`r`) bins.
@@ -632,7 +643,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             model (eqx.Module): Model predicting the properties.
             x_val (jnp.ndarray): Validation input space.
             y_val (jnp.ndarray): Validation target targets.
-            stage_0_gain, stage_1_gain, stage_2_gain (float): Per-stage curriculum gain scalars.
+            stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain (float): Per-stage curriculum gain scalars.
             
         Returns:
             list: Dictionary table denoting metrics calculated solely inside bounds of `r_bin_edges`.
@@ -654,7 +665,7 @@ def train_hybrid_eob_dhnn_model_prelim(
             idx = jnp.asarray(idx_np, dtype=jnp.int32)
             x_bin = jnp.take(x_val, idx, axis=0)
             y_bin = jnp.take(y_val, idx, axis=0)
-            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, stage_0_gain, stage_1_gain, stage_2_gain)
+            _, aux_bin = hybrid_loss_terms(model, x_bin, y_bin, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain)
             l_vf_b, l_flux_b, l_omega_b, l_cons_b, l_q_b, *_ = aux_bin
             rows.append(
                 {
@@ -712,30 +723,33 @@ def train_hybrid_eob_dhnn_model_prelim(
     stage_0_unlock_epoch = 0
     stage_1_unlock_epoch = -1
     stage_2_unlock_epoch = -1
+    stage_3_unlock_epoch = -1
 
     stage_0_gain_now = 1.0
     stage_1_gain_now = 0.0
     stage_2_gain_now = 0.0
+    stage_3_gain_now = 0.0
     
     # VF thresholds that trigger each stage unlock.
     # Stage 1 (omega+rdot): force-unlocks at stage0_epochs; also unlocks early if VF ≤ stage0_vf_target.
     # Stage 2 (flux, cons_diss): threshold-only — only unlock if VF actually improves.
-    vf_target_0 = float(training_params.get("stage0_vf_target", 0.5))
-    vf_target_1  = float(training_params.get("stage1_vf_target",0.005))
-    vf_target_2  = float(training_params.get("stage2_vf_target",0.0001))
+    loss_target_0 = float(training_params.get("stage0_loss_target", 1e-4))
+    loss_target_1  = float(training_params.get("stage1_loss_target",1e-5))
+    loss_target_2  = float(training_params.get("stage2_loss_target",1e-6))
+    loss_target_3  = float(training_params.get("stage3_loss_target",1e-7))
     
     print("HybridEOB per-term unlock thresholds:",
-          {"stage_0": vf_target_0, "stage_1": vf_target_1,
-           "stage_2": vf_target_2})
+          {"stage_0": loss_target_0, "stage_1": loss_target_1,
+           "stage_2": loss_target_2, "stage_3": loss_target_3})
 
-    last_val_l_vf = jnp.array(jnp.inf, dtype=x_train.dtype)
+    last_val_loss = jnp.array(jnp.inf, dtype=x_train.dtype)
     last_val_rel_summary = None
     last_val_pert_ratio = np.inf
     last_val_pert_ratio_comp = None
 
     @eqx.filter_jit
     def scan_epoch(diff_model, static_model, opt_state, batch_indices_in,
-                   stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask):
+                   stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain, trainable_mask):
         def scan_step(carry, batch_idx):
             dm, opt = carry
             x_batch = jnp.take(x_train, batch_idx, axis=0)
@@ -751,7 +765,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 b_l_q,
                 b_rel_abs_mean,
                 b_rel_abs_comp,
-            ) = step(dm, static_model, opt, x_batch, y_batch, stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask)
+            ) = step(dm, static_model, opt, x_batch, y_batch, stage_0_gain, stage_1_gain, stage_2_gain, stage_3_gain, trainable_mask)
             metrics = jnp.stack([b_loss, b_l_vf, b_l_flux, b_l_omega, b_l_cons, b_l_q, b_rel_abs_mean])
             return (dm_next, opt_next), (metrics, b_rel_abs_comp)
 
@@ -766,36 +780,45 @@ def train_hybrid_eob_dhnn_model_prelim(
         perm = jax.random.permutation(key_train, num_train_samples)
         batch_indices = perm[:used_train_samples].reshape((num_train_batches, effective_batch_size))
 
-        vf_now = float(last_val_l_vf)
+        loss_now = float(last_val_loss)
 
         # Sequential unlock: each term fires only after its VF threshold is met
         # (or the hard max-epoch cap is hit) AND after the minimum epoch.
         if (stage_1_unlock_epoch < 0) and (epoch >= any_stage_min_epochs):
-            if (vf_now <= vf_target_0) or (epoch >= any_stage_max_epochs):
+            if (loss_now <= loss_target_0) or (epoch >= any_stage_max_epochs):
                 stage_0_gain_now = 0.1
                 stage_1_gain_now = 1.0
                 stage_1_unlock_epoch = epoch
                 save_model_weights(model, f"{save_weights_path}_stage_0.eqx")
-                print(f"[HybridEOB] Stage 1 unlocked at epoch {epoch} (val_vf={vf_now:.4g})")
+                print(f"[HybridEOB] Stage 1 unlocked at epoch {epoch} (val_loss={loss_now:.4g})")
 
         if (stage_2_unlock_epoch < 0) and (stage_1_unlock_epoch > 0) and (epoch >= stage_1_unlock_epoch + any_stage_min_epochs):
-            if (vf_now <= vf_target_1) or (epoch >= stage_1_unlock_epoch + any_stage_max_epochs):
+            if (loss_now <= loss_target_1) or (epoch >= stage_1_unlock_epoch + any_stage_max_epochs):
                 stage_2_unlock_epoch = epoch
                 stage_1_gain_now = 0.1
                 stage_2_gain_now = 1.0
                 save_model_weights(model, f"{save_weights_path}_stage_1.eqx")
-                print(f"[HybridEOB] Stage 2 unlocked at epoch {epoch} (val_vf={vf_now:.4g})")
+                print(f"[HybridEOB] Stage 2 unlocked at epoch {epoch} (val_loss={loss_now:.4g})")
+        
+        if (stage_3_unlock_epoch < 0) and (stage_2_unlock_epoch > 0) and (epoch >= stage_2_unlock_epoch + any_stage_min_epochs):
+            if (loss_now <= loss_target_2) or (epoch >= stage_2_unlock_epoch + any_stage_max_epochs):
+                stage_3_unlock_epoch = epoch
+                stage_2_gain_now = 0.1
+                stage_3_gain_now = 1.0
+                save_model_weights(model, f"{save_weights_path}_stage_2.eqx")
+                
 
         stage0_g_arr = jnp.array(stage_0_gain_now, dtype=x_train.dtype)
         stage1_g_arr  = jnp.array(stage_1_gain_now,  dtype=x_train.dtype)
         stage2_g_arr  = jnp.array(stage_2_gain_now,  dtype=x_train.dtype)
+        stage3_g_arr  = jnp.array(stage_3_gain_now,  dtype=x_train.dtype)
 
         diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
-        trainable_mask = get_trainable_mask(model, stage0_g_arr, stage1_g_arr, stage2_g_arr)
+        trainable_mask = get_trainable_mask(model, stage0_g_arr, stage1_g_arr, stage2_g_arr, stage3_g_arr)
         
         diff_model, static_model, opt_state, epoch_metrics, train_rel_abs_comp = scan_epoch(
             diff_model, static_model, opt_state, batch_indices,
-            stage0_g_arr, stage1_g_arr, stage2_g_arr, trainable_mask
+            stage0_g_arr, stage1_g_arr, stage2_g_arr, stage3_g_arr, trainable_mask
         )
         model = eqx.combine(diff_model, static_model)
         train_loss = epoch_metrics[0]
@@ -806,7 +829,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         train_l_q = epoch_metrics[5]
         train_rel_abs_mean = epoch_metrics[6]
 
-        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, stage_0_gain_now, stage_1_gain_now, stage_2_gain_now)
+        val_loss, val_aux = hybrid_loss_terms(model, x_val, y_val, stage_0_gain_now, stage_1_gain_now, stage_2_gain_now, stage_3_gain_now)
         (
             val_l_vf,
             val_l_flux,
@@ -861,7 +884,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 np.asarray(val_rel_abs_comp),
             )
             if log_r_binned_val:
-                binned_rows = r_binned_val_metrics(model, x_val, y_val, stage_0_gain_now, stage_1_gain_now, stage_2_gain_now)
+                binned_rows = r_binned_val_metrics(model, x_val, y_val, stage_0_gain_now, stage_1_gain_now, stage_2_gain_now, stage_3_gain_now)
 #                print("HybridEOB Val r-bin summary:", compact_r_binned_summary(binned_rows))
 
         if stop_on_rel_err and (epoch >= rel_err_min_epochs) and (float(val_rel_abs_mean) <= rel_err_target):
