@@ -386,8 +386,8 @@ def train_hybrid_eob_dhnn_model_prelim(
         end_value=lr_end,
     )
     lr_schedule = optax.join_schedules(
-        [single_stage_lr_schedule] * 3, 
-        [total_steps, total_steps]       
+        [single_stage_lr_schedule] * 4, 
+        [total_steps]*4       
     )
     print(
         "HybridEOB LR schedule:",
@@ -578,7 +578,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         # Stage 2 Conservative radial momentum
         cons_true = y[:, 2] - flux_true * (p_rstar / p_phi_safe)
         cons_pred = y_pred[:, 2] - flux_pred * (p_rstar / p_phi_safe)
-        l_cons = jnp.mean(((cons_pred - cons_true) / (jnp.abs(cons_true) + 1e-12)) ** 2)
+        l_cons = jnp.mean(((cons_pred - cons_true)) ** 2)
         l_stage_2 = l_cons
         
         l_total = (
