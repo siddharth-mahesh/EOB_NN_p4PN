@@ -476,6 +476,37 @@ def train_hybrid_eob_dhnn_model_prelim(
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
+    def get_trainable_mask(model, s0_g, s1_g, s2_g):
+        """get_trainable_mask
+        
+        Generate a boolean mask tree for selectively freezing neural heads.
+        - Stage 0: Conservative only (A, D, Q trainable, f frozen)
+        - Stage 1: Dissipative only (f trainable, A, D, Q frozen)
+        - Stage 2: Fine-tuning (All heads trainable)
+        """
+        # Start with all frozen structure
+        mask = jax.tree_util.tree_map(lambda _: False, model)
+        is_inexact = jax.tree_util.tree_map(eqx.is_inexact_array, model)
+
+        if float(s2_g) >= 1.0:
+            # Stage 2: Fine tuning (All)
+            mask = jax.tree_util.tree_map(lambda _: True, model)
+        elif float(s1_g) >= 1.0:
+            # Stage 1: Dissipative only (f_head)
+            # Use tree_map to ensure the mask sub-tree matches the head structure
+            f_mask = jax.tree_util.tree_map(lambda _: True, model.f_head)
+            mask = eqx.tree_at(lambda m: m.f_head, mask, f_mask)
+        else:
+            # Stage 0: Conservative only (A, D, Q)
+            # Use tree_map to ensure structural matching for all selected heads
+            A_mask = jax.tree_util.tree_map(lambda _: True, model.A_head)
+            D_mask = jax.tree_util.tree_map(lambda _: True, model.D_head)
+            Q_mask = jax.tree_util.tree_map(lambda _: True, model.Q_head)
+            mask = eqx.tree_at(lambda m: (m.A_head, m.D_head, m.Q_head), mask, (A_mask, D_mask, Q_mask))
+        
+        # We must return None where is_inexact is False to match the structural presence of None in grads
+        return jax.tree_util.tree_map(lambda m, i: m if i else None, mask, is_inexact)
+
     def hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain):
         """hybrid_loss_terms
         
@@ -548,27 +579,26 @@ def train_hybrid_eob_dhnn_model_prelim(
         return l_total, (l_vf, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp)
 
     @eqx.filter_jit
-    def step(diff_model, static_model, opt_state, x, y, stage_0_gain, stage_1_gain, stage_2_gain):
+    def step(diff_model, static_model, opt_state, x, y, stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask):
         """step
         
         Single optimization step updating model configuration towards multi-objective loss.
-        
-        Args:
-            diff_model (eqx.Module): The active differentiated array components.
-            static_model (eqx.Module): The inactive static python components.
-            opt_state: Optimizer state containing moments.
-            x (jnp.ndarray): Input conditions.
-            y (jnp.ndarray): True target RHS predictions.
-            stage_0_gain, stage_1_gain, stage_2_gain (float): Per-stage curriculum gain scalars.
-            
-        Returns:
-            Tuple with the updated model parameters, opt_state, and expanded tracking variables.
+        Selective head freezing is applied by zeroing out gradients and updates for frozen heads.
         """
         def loss_fn(m):
             return hybrid_loss_terms(m, x, y, stage_0_gain, stage_1_gain, stage_2_gain)
 
         (loss_value, aux), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(diff_model)
+        
+        # Zero-out gradients for frozen heads
+        # Gracefully handle None leaves to match JAX structural expectations
+        grads = jax.tree_util.tree_map(lambda g, m: jnp.where(m, g, 0.0) if g is not None else None, grads, trainable_mask)
+        
         updates, opt_state = optimizer.update(grads, opt_state, diff_model)
+        
+        # Zero-out updates for frozen heads (prevents momentum drift)
+        updates = jax.tree_util.tree_map(lambda u, m: jnp.where(m, u, 0.0) if u is not None else None, updates, trainable_mask)
+        
         diff_model = eqx.apply_updates(diff_model, updates)
         l_vf, l_flux, l_omega, l_cons, l_q, rel_abs_mean, rel_abs_comp = aux
         return (
@@ -705,7 +735,7 @@ def train_hybrid_eob_dhnn_model_prelim(
 
     @eqx.filter_jit
     def scan_epoch(diff_model, static_model, opt_state, batch_indices_in,
-                   stage_0_gain, stage_1_gain, stage_2_gain):
+                   stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask):
         def scan_step(carry, batch_idx):
             dm, opt = carry
             x_batch = jnp.take(x_train, batch_idx, axis=0)
@@ -721,7 +751,7 @@ def train_hybrid_eob_dhnn_model_prelim(
                 b_l_q,
                 b_rel_abs_mean,
                 b_rel_abs_comp,
-            ) = step(dm, static_model, opt, x_batch, y_batch, stage_0_gain, stage_1_gain, stage_2_gain)
+            ) = step(dm, static_model, opt, x_batch, y_batch, stage_0_gain, stage_1_gain, stage_2_gain, trainable_mask)
             metrics = jnp.stack([b_loss, b_l_vf, b_l_flux, b_l_omega, b_l_cons, b_l_q, b_rel_abs_mean])
             return (dm_next, opt_next), (metrics, b_rel_abs_comp)
 
@@ -761,9 +791,11 @@ def train_hybrid_eob_dhnn_model_prelim(
         stage2_g_arr  = jnp.array(stage_2_gain_now,  dtype=x_train.dtype)
 
         diff_model, static_model = eqx.partition(model, eqx.is_inexact_array)
+        trainable_mask = get_trainable_mask(model, stage0_g_arr, stage1_g_arr, stage2_g_arr)
+        
         diff_model, static_model, opt_state, epoch_metrics, train_rel_abs_comp = scan_epoch(
             diff_model, static_model, opt_state, batch_indices,
-            stage0_g_arr, stage1_g_arr, stage2_g_arr
+            stage0_g_arr, stage1_g_arr, stage2_g_arr, trainable_mask
         )
         model = eqx.combine(diff_model, static_model)
         train_loss = epoch_metrics[0]
