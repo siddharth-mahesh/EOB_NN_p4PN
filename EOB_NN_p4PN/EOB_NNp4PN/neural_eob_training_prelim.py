@@ -386,7 +386,8 @@ def train_hybrid_eob_dhnn_model_prelim(
         end_value=lr_end,
     )
     lr_schedule = optax.join_schedules(
-        [single_stage_lr_schedule] * 3,        
+        [single_stage_lr_schedule] * 3, 
+        [total_steps, total_steps]       
     )
     print(
         "HybridEOB LR schedule:",
@@ -870,7 +871,7 @@ if __name__ == "__main__":
     experiment = "hybrid_eob"
     hidden_dim = 32
     p_dim = 4
-    q_dim = 2
+    q_dim = 5
     training_params = {
         "experiment": "hybrid_eob",
         # -- Core --
