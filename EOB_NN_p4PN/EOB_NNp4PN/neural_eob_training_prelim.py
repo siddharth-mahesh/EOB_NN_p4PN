@@ -504,7 +504,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         y_pred = m(x)
         rel_sq = ((y_pred - y) / (jnp.abs(y) + eps)) ** 2  # (N, 4)
         l_vf = jnp.mean(rel_sq)
-        l_stage_0 = l_vf
+        l_stage_2 = l_vf
         rel_abs_mean, rel_abs_comp = _componentwise_relative_error_metrics_from_pred(y_pred, y, eps=eps)
         
         p_rstar = x[:, 3]
@@ -528,7 +528,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         l_q = jnp.mean(((dr_ratio_pred - dr_ratio_true) / (jnp.abs(dr_ratio_true) + 1e-12)) ** 2)
         omega_err_sq = ((omega_pred - omega_true) / (jnp.abs(omega_true) + 1e-12)) ** 2
         l_omega = jnp.mean(omega_err_sq)
-        l_stage_1 = l_omega + l_q
+        l_stage_0 = l_omega + l_q
 
         # Stage 2 Flux + Loss 
         flux_true = y[:, 3]
@@ -537,7 +537,7 @@ def train_hybrid_eob_dhnn_model_prelim(
         cons_true = y[:, 2] - flux_true * (p_rstar / p_phi_safe)
         cons_pred = y_pred[:, 2] - flux_true * (p_rstar / p_phi_safe)
         l_cons = jnp.mean(((cons_pred - cons_true) / (jnp.abs(cons_true) + 1e-12)) ** 2)
-        l_stage_2 = l_flux + l_cons
+        l_stage_1 = l_flux + l_cons
         
         l_total = (
             stage_0_gain * l_stage_0
@@ -683,8 +683,8 @@ def train_hybrid_eob_dhnn_model_prelim(
     stage_2_unlock_epoch = -1
 
     stage_0_gain_now = 1.0
-    stage_1_gain_now = 0.1
-    stage_2_gain_now = 0.1
+    stage_1_gain_now = 0.0
+    stage_2_gain_now = 0.0
     
     # VF thresholds that trigger each stage unlock.
     # Stage 1 (omega+rdot): force-unlocks at stage0_epochs; also unlocks early if VF ≤ stage0_vf_target.
