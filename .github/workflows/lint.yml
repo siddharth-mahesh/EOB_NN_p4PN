@@ -25,4 +25,4 @@ jobs:
         pip install mypy pydocstyle darglint  # Install missing linting tools
         
     - name: Run linting suite
-      run: bash lint.sh
+      run: bash .github/workflows/lint.sh
