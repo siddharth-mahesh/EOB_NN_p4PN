@@ -39,6 +39,8 @@ librt==0.8.1
 pysr==1.5.9
 snowballstemmer==3.0.1
 sympy2jax==0.0.8
+matplotlib==3.10.6
+matplotlib-inline==0.2.1
 mypy==1.20.0
 pydocstyle==6.3.0
 darglint==1.8.1
