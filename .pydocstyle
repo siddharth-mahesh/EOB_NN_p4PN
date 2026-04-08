@@ -1,0 +1,6 @@
+[pydocstyle]
+convention = google
+inherit = false
+add_ignore = D105, D107, D203, D213
+match = .*\.py
+match-dir = (?!.venv).*

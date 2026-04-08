@@ -27,6 +27,25 @@ pip install -r requirements.txt
   - The repository uses JAX. For GPU acceleration, install the matching CUDA/cuDNN build of `jax`/`jaxlib` from the official instructions: https://jax.readthedocs.io/en/latest/installation.html
   - If you install GPU wheels, do it before (or instead of) the CPU wheels pinned in `requirements.txt`.
 
+## Examples
+
+- **Symbolic Regression of Damped Oscillatory Systems**
+  - Uses `PySR` to discover the equations of motion for damped oscillators and pendulums from trajectory data.
+  - Automatically quantizes and simplifies the resulting symbolic expressions.
+  - Generates comparison plots between the ground truth and the symbolic model.
+
+```bash
+python EOB_NN_p4PN/dho_example/damped_oscillators_symbolic_regression.py
+```
+
+- **Training NeuralEOB on SEOBNRv5 (RHS Regression)**
+  - Trains a differentiable EOB perturber to reproduce the SEOBNRv5 equations-of-motion right-hand side (RHS) using a JAX/Equinox framework.
+  - **Advanced Training Strategy**: Uses a multi-stage objective including a *Conservative phase* (learns the geodesic A and D potentials), *Flux Phase* (learns the residual PN f potentials in the factorized-resummed modes), *Q phase* (learns the quartic-in-momentum Q potential).
+
+```bash
+python EOB_NN_p4PN/EOB_NNp4PN/neural_eob_training_prelim.py
+```
+
 ## Repository structure
 
 - (In Progress)**EOB_NNp4PN/**

@@ -113,3 +113,6 @@ tzdata==2025.2
 urllib3==2.5.0
 wadler_lindig==0.1.7
 wcwidth==0.2.14
+mypy
+pydocstyle
+darglint
